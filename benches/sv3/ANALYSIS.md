@@ -723,7 +723,7 @@ SIMD is the lower VF on every row. Bold is that VF.
 
 ### Recreating the cases
 
-Run these from `benches/sv3/nk`. The case directory is `runs/<kind>-n<N>-k<K>`. A thread launch other than 256 is `runs/thread-n<N>-k<K>-t<threads>`.
+Run these from `benches/sv3/schedules`. The case directory is `runs/<kind>-n<N>-k<K>`. A thread launch other than 256 is `runs/thread-n<N>-k<K>-t<threads>`.
 
 ```bash
 python compile.py thread|ub|warp|simd N K [threads]
@@ -743,8 +743,8 @@ python decode.py <instr.bin> N K thread|simd
 
 **Table 11.** Buffer VF from Table 6 against the SIMD VF from Tables 1 and 2.
 
-**Tables 7, 8, and 9.** `runs/ub-n4096-k32`. Table 8 sums the issue span of each opcode across the two launches. `LDS` divides `2 × N × K + 2 × K` by that span. `F2F` and `FFMA` divide `N × K` by that span. `STS` divides `4 × N` by that span. Table 9 is completion minus issue inside the VF window. The single-op rates are the 32-float programs at 256 threads in `simt-uarch/`. The `F2F` row uses the `FADD` program.
+**Tables 7, 8, and 9.** `runs/ub-n4096-k32`. Table 8 sums the issue span of each opcode across the two launches. `LDS` divides `2 × N × K + 2 × K` by that span. `F2F` and `FFMA` divide `N × K` by that span. `STS` divides `4 × N` by that span. Table 9 is completion minus issue inside the VF window. The single-op rates are the 32-float programs at 256 threads in `single-op/`. The `F2F` row uses the `FADD` program.
 
-**Table 10 and Figures 4 and 5.** The CCE source is `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Launch it with `launch.py` from `benches/sv3/nk`, `N = 4096`, `K = 32`. Figures 4 and 5 are the first launch of that trace and of `runs/ub-n4096-k32`. From `benches/sv3`, `python cce/plot_compare.py` writes them under `plots/`.
+**Table 10 and Figures 4 and 5.** The CCE source is `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Launch it with `schedules/launch.py`, `N = 4096`, `K = 32`. Figures 4 and 5 are the first launch of that trace and of `runs/ub-n4096-k32`. From `benches/sv3`, `python cce/plot_compare.py` writes them under `plots/`.
 
-**Figures.** Figure 1 is Table 4. Figure 2 reads `runs/simd-n4096-k32`. Figure 3 reads `runs/ub-n4096-k32`. `python plot_charts.py` writes all three under `../plots/`.
+**Figures.** Figure 1 is Table 4. Figure 2 reads `runs/simd-n4096-k32`. Figure 3 reads `runs/ub-n4096-k32`. From `benches/sv3`, `python schedules/plot_charts.py` writes all three under `plots/`.

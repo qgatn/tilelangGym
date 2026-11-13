@@ -1,0 +1,7 @@
+f2f_packed_v3_t128 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=440 busy=292 act_min=8 act_med=8 act_max=8
+f2f_packed_v3_t256 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=292 busy=208 act_min=8 act_med=8 act_max=8
+f2f_packed_v3_t512 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=397 busy=286 act_min=8 act_med=8 act_max=8
+V3_DONE

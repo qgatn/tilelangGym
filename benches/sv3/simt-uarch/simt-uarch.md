@@ -1,274 +1,208 @@
 # uarch
 
-Each thread holds 32 independent float32 values, issued into registers before any use. The index is `tid + k * threads`, so one warp still touches 32 consecutive floats. Every launch is one block, `threads` by 1. Every launch passed.
+- Single-op SIMT microbenches on one block (`dav-3510`). Source: `../single-op/pure_burst.asc` (+ `lds_pure_burst.asc`, `hide32.asc`). Charts: opcode IPC + per-warp, from the trace's VF window.
+- Index: `tid + i * threads` (warp coalesces 32 consecutive els / issue).
+- **Busy** = union of `[issue, completion)` for the target opcode across warps.
+- **Purity**: target opcode + forced helpers only (`IADD_I`/`LEA` addr, `LDS` preload for F2F/FFMA, checksum/`STS` sink). No spills. No cross-op contamination in LDS.
+- **I-cache / first-launch**: every chart reads the trace's **VF[0]** window. Microbenches are single-launch; the known first-launch post-`END` blank (`I-cache_miss.md`) is **outside** the target-op busy union, so rates are unaffected. Multi-slab case kernels are the ones needing VF[1] accounting (`SV3-theoretical.md`).
 
-One issue is one warp of 32 lanes. A 32-bit load or store moves 128 bytes. An add or a multiply-add writes 32 elements. The bytes or elements are divided by the cycles from the first issue of that opcode to its last completion. The active column is the median of completion minus issue. The element count is the whole launch. Divide by the thread count to get one thread.
+## 1. Case config
 
-1024 threads with two unified-buffer copies is 256 KB. The unified buffer is 248 KB, so the unified-buffer ops stop at 512 threads.
+- GEMV case: `N=4096`, `K=8`, 256t, `A`/`x` = fp16. Theory ref: `N=2048`, `K=8`, `ub-n2048-k8-t256`.
 
-## 1. LDS
+| Op | Dtype | B or els / warp-issue | Active cyc |
+|---|---|---|---|
+| LDS | fp16 | 64 B (scalar) / 128 B (pack) | 27–29 |
+| F2F | fp16→fp32 | 32 (scalar) / 64 (pack) | 8 |
+| FFMA | fp32 | 32 products | 11 |
+| STS | fp32 | 128 B | 20 |
 
-At 32 threads a warp holds 9 loads in flight. The rate is 19.60 bytes per cycle. A full 128 bytes per cycle would finish in one cycle per issue.
+## 2. LDS
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">Issues</th>
-<th align="center">Span</th>
-<th align="center">Active</th>
-<th align="center">B/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">32</td>
-<td align="center">32</td>
-<td align="center">209</td>
-<td align="center">27</td>
-<td align="center">19.60</td>
-</tr>
-<tr>
-<td align="center">128</td>
-<td align="center">128</td>
-<td align="center">252</td>
-<td align="center">27</td>
-<td align="center">65.02</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">394</td>
-<td align="center">29</td>
-<td align="center"><b>83.17</b></td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">1058</td>
-<td align="center">36</td>
-<td align="center">61.94</td>
-</tr>
-</tbody>
-</table>
+- Index: `tid + i * threads` (strided; warp coalesces). Contiguous `tid*WPT+i` bank-conflicts → ~4 B/cyc (rejected). Per-lane float4 also conflicts (31.21, `lds_variants_results.txt`).
+- Sink = 1 checksum word/thread (`STS` outside load band). Source: `../single-op/lds_pure_burst.asc`.
 
-The load peaks at 256 threads, 83.17 bytes per cycle. At 512 threads each load stays active for 36 cycles and the rate falls.
+### 2.1 Size-scaled peaks (fp32 LDS.b32)
 
-SV1 sustains 114.98 bytes per cycle on `bw_b32_sep_ptr_e8192_t128_mi_off`. That run is 8192 floats and 128 threads, 32768 bytes over 285 cycles, and the load region contains only `LDS`. 85% of the 128 byte line is 108.8 bytes per cycle.
+| Threads | N | WPT | Issues | Busy | B/cyc | iss/cyc |
+|---:|---:|---:|---:|---:|---:|---:|
+| **256** | 24576 | 96 | 768 | 1287 | **76.38** | 0.597 |
+| **512** | 49152 | 96 | 1536 | 2049 | **95.95** | 0.750 |
+| **1024** | 49152 | 48 | 1536 | 2012 | **97.72** | 0.763 |
 
-This program still issues an address add with each load. Those adds share the issue slots with `LDS`.
+- @256t: denser WPT past 96 **drops** (WPT=192 → ~58). 8 warps cannot hide LDS latency — **76.38 is the 256t ceiling**.
+- @512t: best at WPT=96; larger N softens (N=61440 → 91.98).
+- @1024t: **97.72** — best measured; saturates with more warps. @2048t collapses (30.5).
+- bf16x2 ties fp32 at 512t within ~1.5 B/cyc and **exactly at 1024t** (both busy 2012).
+- SoftLib ~114 still open: `IADD_I` 1:1 with `LDS`; pointer-walk / pre-addr / unroll all CSE back (`lds_variants_results.txt`).
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">LDS</th>
-<th align="center">IADD in the burst</th>
-<th align="center">STS in the burst</th>
-<th align="center">B/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">128</td>
-<td align="center">128</td>
-<td align="center">149</td>
-<td align="center">1</td>
-<td align="center">65.02</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">326</td>
-<td align="center">15</td>
-<td align="center">83.17</td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">894</td>
-<td align="center">292</td>
-<td align="center">61.94</td>
-</tr>
-</tbody>
-</table>
+![LDS fp32 peak 256t](plots/lds_fp32_peak_t256.png)
 
-At 512 threads the stores start before the loads finish, and the rate falls from the 256-thread peak.
+![LDS fp32 peak 256t warps](plots/lds_fp32_peak_t256_warps.png)
 
-## 2. LDG
+![LDS fp32 peak 512t](plots/lds_fp32_peak_t512.png)
 
-The same 32 floats are read from global memory. The active time is 583 to 1146 cycles.
+![LDS fp32 peak 512t warps](plots/lds_fp32_peak_t512_warps.png)
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">Issues</th>
-<th align="center">Span</th>
-<th align="center">Active</th>
-<th align="center">B/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">32</td>
-<td align="center">32</td>
-<td align="center">2107</td>
-<td align="center">1146</td>
-<td align="center">1.94</td>
-</tr>
-<tr>
-<td align="center">128</td>
-<td align="center">128</td>
-<td align="center">5722</td>
-<td align="center">603</td>
-<td align="center">2.86</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">6341</td>
-<td align="center">583</td>
-<td align="center">5.17</td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">6276</td>
-<td align="center">640</td>
-<td align="center">10.44</td>
-</tr>
-<tr>
-<td align="center">1024</td>
-<td align="center">1024</td>
-<td align="center">9918</td>
-<td align="center">628</td>
-<td align="center"><b>13.22</b></td>
-</tr>
-</tbody>
-</table>
+### 2.2 Schedules @256t (N = 8192, matched small tile)
 
-The global load peaks at 1024 threads, 13.22 bytes per cycle.
+| Schedule | Load shape | Issues | Busy | B/cyc | iss/cyc |
+|---|---|---:|---:|---:|---:|
+| S1 scalar fp16 | 64 B/issue | 256 | 471 | 34.79 | 0.54 |
+| S2 `uint32` pack | 128 B/issue | 128 | 202 | **81.11** | 0.63 |
+| S3 `half2` pack | 128 B/issue | 128 | 202 | **81.11** | 0.63 |
+| S4 `bfloat16x2` pack | 128 B/issue | 128 | 202 | **81.11** | 0.63 |
 
-## 3. STS
+- Small-tile matched compare: fp32 scalar (256 issues, 471, 69.57) ≡ bf16x2 doubled (256, 471, 69.57) — width packing never *beats* fp32; best case equality (`lds_fp32_vs_bf16.md`).
 
-The store writes 1.0 on each of the 32 floats. Active time stays 20 cycles.
+![LDS S1 IPC](plots/lds_s1_scalar_t256.png)
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">Issues</th>
-<th align="center">Span</th>
-<th align="center">Active</th>
-<th align="center">B/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">32</td>
-<td align="center">32</td>
-<td align="center">326</td>
-<td align="center">20</td>
-<td align="center">12.56</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">497</td>
-<td align="center">20</td>
-<td align="center">65.93</td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">717</td>
-<td align="center">20</td>
-<td align="center"><b>91.40</b></td>
-</tr>
-</tbody>
-</table>
+![LDS S1 warps](plots/lds_s1_scalar_t256_warps.png)
 
-The store peaks at 512 threads, 91.40 bytes per cycle.
+![LDS S2 IPC](plots/lds_s2_u32_t256.png)
+
+![LDS S2 warps](plots/lds_s2_u32_t256_warps.png)
+
+![LDS S4 IPC](plots/lds_s4_bf16x2_t256.png)
+
+![LDS S4 warps](plots/lds_s4_bf16x2_t256_warps.png)
+
+### 2.3 Comparison
+
+| Case | Width | Busy | B/cyc | Note |
+|---|---|---:|---:|---|
+| S1 scalar @256 | 64 B | 471 | 34.79 | 2× issues |
+| S2/S3/S4 pack @256 | 128 B | 202 | **81.11** | GEMV half-tile |
+| fp32 size peak @256 | 128 B | 1287 | **76.38** | warp-limited ceiling |
+| fp32 size peak @512 | 128 B | 2049 | **95.95** | |
+| fp32/bf16x2 @1024 | 128 B | 2012 | **97.72** | best measured |
+
+## 3. F2F
+
+- Fixed work/thread: 32 el → `N = 32 × threads`. Preload `LDS` then convert band. el/cyc = `N / busy`.
+
+### 3.1 Schedules
+
+| Schedule | Band | 256t Issues | 256t Busy | 256t el/cyc | 512t el/cyc | 1024t el/cyc |
+|---|---|---:|---:|---:|---:|---:|
+| S1 scalar `__cvt_float` | stagger | 256 | 275 | 29.79 | 26.64 | 12.02 |
+| S2 packed + `PRMT` | stagger + PRMT | 128 | 281 | 29.15 | 23.74 | – |
+| S3 word-preload | stagger | 128 | 208 | 39.38 | 17.58 | 28.59 |
+| **S4 barrier-aligned** | 4 co-issue/tick | **128** | **76** | **107.79** | **39.57** | **30.65** |
+
+- **S4 wins at every T, but only 256t holds the ceiling**: busy stays 76 @256t, then 414 @512t and 1069 @1024t — 32 warps over-fill the issue window (iss/cyc 0.48).
+- Multi-thread rows: `f2f_wpt32_results.txt` (128/256/512), `t1024_results.txt` (1024).
+
+![F2F S4 IPC](plots/f2f_s4_barrier_t256.png)
+
+![F2F S4 warps](plots/f2f_s4_barrier_t256_warps.png)
+
+![F2F S4 barrier 512t](plots/pure_f2f_s4_barrier_t512.png)
+
+![F2F S4 barrier 512t warps](plots/pure_f2f_s4_barrier_t512_warps.png)
+
+![F2F S4 barrier 1024t](plots/pure_f2f_s4_barrier_t1024.png)
+
+![F2F S4 barrier 1024t warps](plots/pure_f2f_s4_barrier_t1024_warps.png)
+
+![F2F S1 IPC](plots/f2f_s1_scalar_t256.png)
+
+![F2F S3 IPC](plots/f2f_s3_word_t256.png)
+
+### 3.2 Takeaway
+
+- Winner: **S4 — 107.79 el/cyc @256t**. Packing halves issues; the barrier is what makes the rate scale.
+- The 107.79 line is a **256t-only property** (see §6 tradeoff).
 
 ## 4. FFMA
 
-The program is `dst = a * b + a` after both inputs are loaded. The cells are output elements per cycle for the whole launch. Active time stays 11 cycles. The stores are issued in the same window as the arithmetic.
+- Fixed `N=8192` (issues stay 256 at every T). Preload+convert both operands (`LDS`+`F2F`), then multiply band. No packed FFMA ISA.
+- el/cyc = `8192 / busy`.
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">Issues</th>
-<th align="center">Span</th>
-<th align="center">Active</th>
-<th align="center">Elements/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">32</td>
-<td align="center">32</td>
-<td align="center">548</td>
-<td align="center">11</td>
-<td align="center">1.87</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">721</td>
-<td align="center">11</td>
-<td align="center"><b>11.36</b></td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">2223</td>
-<td align="center">11</td>
-<td align="center">7.37</td>
-</tr>
-</tbody>
-</table>
+### 4.1 Schedules
 
-The multiply-add peaks at 256 threads, 11.36 elements per cycle. One thread at that launch writes 11.36 / 256 = 0.044 elements per cycle.
+| Schedule | Band | 256t Busy | 256t el/cyc | 512t el/cyc | 1024t el/cyc |
+|---|---|---:|---:|---:|---:|
+| S1 scalar | stagger | 479 | 17.10 | 9.91 | 8.54 |
+| S2 float2-src | tighter schedule | 422 | 19.41 | 14.47 | – |
+| **S3 barrier-aligned** | pure band | **392** | **20.90** | **24.67** | **26.01** |
 
-## 5. FADD
+- S3 improves with warps (20.90 → 24.67 → 26.01): fewer preload leaks per warp inside the barrier window.
+- All S3 numbers are **lower bounds** — other warps' preload `F2F`/`LDS` can still sit in the busy union. Serial fused case reaches **32.38** (`SV3-theoretical.md` §3.3), which is the practical staged ceiling.
 
-The program is `dst = a + b` after both inputs are loaded. The cells are output elements per cycle for the whole launch. Active time stays 8 cycles. The stores are issued in the same window as the arithmetic.
+![FFMA S3 IPC](plots/ffma_s3_barrier_t256.png)
 
-<table align="center">
-<thead>
-<tr>
-<th align="center">Threads</th>
-<th align="center">Issues</th>
-<th align="center">Span</th>
-<th align="center">Active</th>
-<th align="center">Elements/cycle</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">32</td>
-<td align="center">32</td>
-<td align="center">504</td>
-<td align="center">8</td>
-<td align="center">2.03</td>
-</tr>
-<tr>
-<td align="center">256</td>
-<td align="center">256</td>
-<td align="center">896</td>
-<td align="center">8</td>
-<td align="center"><b>9.14</b></td>
-</tr>
-<tr>
-<td align="center">512</td>
-<td align="center">512</td>
-<td align="center">2355</td>
-<td align="center">8</td>
-<td align="center">6.96</td>
-</tr>
-</tbody>
-</table>
+![FFMA S3 warps](plots/ffma_s3_barrier_t256_warps.png)
 
-The add peaks at 256 threads, 9.14 elements per cycle. One thread at that launch writes 9.14 / 256 = 0.036 elements per cycle.
+![FFMA S3 barrier 512t](plots/pure_ffma_s3_barrier_t512.png)
+
+![FFMA S3 barrier 1024t](plots/pure_ffma_s3_barrier_t1024.png)
+
+![FFMA S1 IPC](plots/ffma_s1_scalar_t256.png)
+
+### 4.2 Takeaway
+
+- Winner: **S3**. No packed FFMA on this ISA; measured microbench line stays a lower bound below serial's 32.38.
+
+## 5. STS
+
+| Threads | Issues | Busy | B/cyc |
+|---:|---:|---:|---:|
+| 256 | 256 | 355 | 92.30 |
+| 512 | 512 | 687 | **95.34** |
+| 1024 | 1024 | 1316 | **99.60** |
+
+- Single coalesced schedule; every issue active 20 cyc. Rate scales mildly with warps — **99.60 @1024t is the best measured store rate**.
+
+![STS S1 IPC](plots/sts_s1_t256.png)
+
+![STS S1 warps](plots/sts_s1_t256_warps.png)
+
+![STS coalesced 512t](plots/hide32_sts_t512.png)
+
+![STS coalesced 1024t](plots/hide32_sts_t1024.png)
+
+## 6. Conclusion
+
+### 6.1 Winners per thread count
+
+| T | LDS | F2F | FFMA | STS |
+|---:|---:|---:|---:|---:|
+| **256** | 76.38 | **107.79** | 20.90 | 92.30 |
+| 512 | 95.95 | 39.57 | 24.67 | 95.34 |
+| 1024 | **97.72** | 30.65 | **26.01** | **99.60** |
+
+- **LDS / STS / FFMA** improve with warps. **F2F collapses** past 256t — the packed barrier band needs tight warp interleave.
+
+### 6.2 256t vs 512t vs 1024t — SV3 GEMV serial model
+
+Work: LDS 32784 B, F2F 16392 el, FFMA 16384 el, STS 8192 B (one kernel, `N=2048`, `K=8`).
+
+| T | LDS cyc | F2F cyc | FFMA cyc | STS cyc | **Total** | el/cyc |
+|---:|---:|---:|---:|---:|---:|---:|
+| **256** | 429 | **152** | 784 | 89 | **1454** | **1.41** |
+| 512 | 342 | 414 | 664 | 86 | **1506** | 1.36 |
+| 1024 | 336 | 535 | 630 | 82 | **1583** | 1.29 |
+
+- Warps buy ~190 cycles on LDS+FFMA+STS (256→1024t) but **cost ~383 on F2F** — net loss for a convert-heavy kernel.
+- Break-even: 1024t needs F2F ≥ **40.3 el/cyc** to tie 256t (has 30.65). With FFMA at its true staged 32.38 everywhere, 1024t needs F2F ≥ **30.9** — a near-tie, still not a win.
+- FFMA dominates the mix (~50% of cycles at every T); its rates here are lower bounds, so the 256t total (with staged FFMA 32.38 → **1176 cyc, 1.74 el/cyc**) is the strongest model line.
+- **Verdict: 256t is the right launch for the F2F-heavy GEMV; 1024t only pays for pure streaming (LDS/STS-dominated, no converts).**
+
+### 6.3 Ceiling summary
+
+| Op | Best rate | Where | Note |
+|---|---:|---|---|
+| LDS | **97.72 B/cyc** | 1024t size-scaled | 256t ceiling 76.38; SoftLib ~114 open |
+| F2F | **107.79 el/cyc** | 256t S4 barrier | 256t-only; fused ~47 |
+| FFMA | **32.38 el/cyc** | serial fused 256t | microbench S3 is a lower bound |
+| STS | **99.60 B/cyc** | 1024t coalesced | ~flat 92–100 |
+
+## Appendix — provenance
+
+- Env: Ascend950PR / npusim, `dav-3510`, bisheng `-O2 --npu-arch=dav-3510`, CANN `9.2.0-beta.2`.
+- Sources: `../single-op/pure_burst.asc` (`-DPURE_OP` / `-DPURE_KIND`), `lds_pure_burst.asc` (+ `launch_lds_pure.py`), `hide32.asc` (STS).
+- Results: `pure_results.txt`, `lds_size_peak_results.txt`, `lds_variants_results.txt`, `f2f_wpt32_results.txt`, `sv3_burst_results.txt`, `f2f_ffma_packed_results.txt`, `t512_ref` runs, `t1024_results.txt` (`t1024_probe.sh`).
+- Charts: `tools/instr_vs_ipc.py` + `tools/warpchart.py` → `plots/` (`*_s*_t256.png`, `lds_fp32_peak_t{256,512}*.png`, `pure_f2f_s4_barrier_t{512,1024}*.png`, `pure_ffma_s3_barrier_t{512,1024}*.png`, `hide32_sts_t{512,1024}*.png`).
+- Rebuild: `bash pure_sweep.sh` / `bash t1024_probe.sh` under `../single-op/` (after `set_env.sh` + `TL_CAMODEL_LIB`).
+- Note: `npusim record` teardown segfaults on the 512/1024t runs (stub double-free, exit 139) — traces and rates are valid; F2F outputs verified bit-exact in a direct run.

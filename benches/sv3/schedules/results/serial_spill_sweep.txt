@@ -1,0 +1,16 @@
+# serial LDK/STK sweep 2026-11-10T19:59:03+08:00
+===== RECORD serial-n512-k8-t256 =====
+launches=2 VF=998 el/cyc=0.51 mac/cyc=4.10 IPC=0.69 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n512-k8-t256/npusim/npusim_20261110195904_launch.py/record/instr.bin
+===== RECORD serial-n256-k8-t128 =====
+launches=2 VF=907 el/cyc=0.28 mac/cyc=2.26 IPC=0.37 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n256-k8-t128/npusim/npusim_20261110195943_launch.py/record/instr.bin
+===== RECORD serial-n1024-k8-t256 =====
+launches=2 VF=2152 el/cyc=0.48 mac/cyc=3.81 IPC=0.47 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n1024-k8-t256/npusim/npusim_20261110200013_launch.py/record/instr.bin
+===== RECORD serial-n2048-k8-t256 =====
+launches=2 VF=2960 el/cyc=0.69 mac/cyc=5.54 IPC=0.57 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=1.192e-07 | schedules/runs/serial-n2048-k8-t256/npusim/npusim_20261110200043_launch.py/record/instr.bin
+===== RECORD serial-n4096-k8-t2048 =====
+launches=2 VF=4277 el/cyc=0.96 mac/cyc=7.66 IPC=1.29 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n4096-k8-t2048/npusim/npusim_20261110200120_launch.py/record/instr.bin
+===== RECORD serial-n4096-k8-t1024 =====
+launches=2 VF=5933 el/cyc=0.69 mac/cyc=5.52 IPC=0.68 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n4096-k8-t1024/npusim/npusim_20261110200155_launch.py/record/instr.bin
+===== RECORD serial-n4096-k8-t512 =====
+launches=2 VF=5627 el/cyc=0.73 mac/cyc=5.82 IPC=0.60 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0 | PASS maxabs=2.384e-07 | schedules/runs/serial-n4096-k8-t512/npusim/npusim_20261110200238_launch.py/record/instr.bin
+DONE

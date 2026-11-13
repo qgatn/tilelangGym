@@ -1,0 +1,19 @@
+sv3_lds_t128 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=697 busy=697 act_min=27 act_med=27 act_max=31
+sv3_lds_t256 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=487 busy=487 act_min=27 act_med=29 act_max=41
+sv3_lds_t512 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=406 busy=406 act_min=27 act_med=34 act_max=47
+sv3_f2f_t128 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=200 busy=193 act_min=8 act_med=8 act_max=8
+sv3_f2f_t256 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=378 busy=275 act_min=8 act_med=8 act_max=8
+sv3_f2f_t512 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=601 busy=472 act_min=8 act_med=8 act_max=8
+sv3_ffma_t128 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=672 busy=453 act_min=11 act_med=11 act_max=11
+sv3_ffma_t256 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=583 busy=479 act_min=11 act_med=11 act_max=11
+sv3_ffma_t512 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=943 busy=827 act_min=11 act_med=11 act_max=11
+SWEEP_DONE

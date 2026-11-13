@@ -1,0 +1,30 @@
+KIND=ub span_1vf=4438 vf_full=4438
+  LDS work=32784 busy=4241 rate=7.7303 issues=576
+  F2F work=16392 busy=2386 rate=6.8701 issues=576
+  FFMA work=16384 busy=1905 rate=8.6005 issues=512
+  STS work=8192 busy=364 rate=22.5055 issues=32
+
+KIND=methodo span_1vf=2624 vf_full=5248
+  LDS work=16400 busy=2345 rate=6.9936 issues=288
+  F2F work=8200 busy=2027 rate=4.0454 issues=288
+  FFMA work=8192 busy=1655 rate=4.9498 issues=256
+  STS work=4096 busy=83 rate=49.3494 issues=16
+
+KIND=serial span_1vf=1472 vf_full=2944
+  LDS work=16400 busy=1085 rate=15.1152 issues=160
+  F2F work=8200 busy=174 rate=47.1264 issues=160
+  FFMA work=8192 busy=253 rate=32.3794 issues=256
+  STS work=4096 busy=83 rate=49.3494 issues=16
+
+KIND=warp_pipe span_1vf=1332 vf_full=2664
+  LDS work=16400 busy=677 rate=24.2245 issues=160
+  F2F work=8200 busy=195 rate=42.0513 issues=160
+  FFMA work=8192 busy=389 rate=21.0591 issues=256
+  STS work=4096 busy=112 rate=36.5714 issues=32
+
+KIND=dbl_buf span_1vf=1070 vf_full=2140
+  LDS work=16400 busy=638 rate=25.7053 issues=160
+  F2F work=8200 busy=173 rate=47.3988 issues=160
+  FFMA work=8192 busy=283 rate=28.9470 issues=256
+  STS work=4096 busy=134 rate=30.5672 issues=32
+

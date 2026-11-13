@@ -1,0 +1,49 @@
+lds_fp32_t128 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=505 busy=505 act_min=27 act_med=27 act_max=32
+lds_fp32_t256 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=394 busy=394 act_min=27 act_med=29 act_max=48
+lds_fp32_t512 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=538 busy=538 act_min=27 act_med=34 act_max=51
+lds_bf16_t128 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=358 busy=358 act_min=27 act_med=27 act_max=33
+lds_bf16_t256 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=370 busy=370 act_min=27 act_med=27 act_max=42
+lds_bf16_t512 PASS maxabs=0.000e+00
+op=SIMT_LDS n=256 span=509 busy=505 act_min=27 act_med=38 act_max=54
+sts_fp32_t128 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=350 busy=350 act_min=20 act_med=20 act_max=20
+sts_fp32_t256 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=353 busy=353 act_min=20 act_med=20 act_max=20
+sts_fp32_t512 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=357 busy=357 act_min=20 act_med=20 act_max=20
+sts_bf16_t128 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=350 busy=350 act_min=20 act_med=20 act_max=20
+sts_bf16_t256 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=353 busy=353 act_min=20 act_med=20 act_max=20
+sts_bf16_t512 PASS maxabs=0.000e+00
+op=SIMT_STS n=256 span=358 busy=358 act_min=20 act_med=20 act_max=20
+ffma_fp32_t128 PASS maxabs=1.192e-07
+op=SIMT_FFMA n=256 span=6955 busy=1048 act_min=11 act_med=11 act_max=11
+ffma_fp32_t256 PASS maxabs=1.192e-07
+op=SIMT_FFMA n=256 span=19065 busy=1559 act_min=11 act_med=11 act_max=11
+ffma_fp32_t512 PASS maxabs=1.192e-07
+op=SIMT_FFMA n=256 span=12520 busy=2075 act_min=11 act_med=11 act_max=11
+ffma_bf16_t128 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=23011 busy=1287 act_min=11 act_med=11 act_max=11
+ffma_bf16_t256 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=6915 busy=901 act_min=11 act_med=11 act_max=11
+ffma_bf16_t512 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=8725 busy=2009 act_min=11 act_med=11 act_max=11
+f2f_fp32_t128 PASS maxabs=0.000e+00
+no SIMT_F2F
+f2f_fp32_t256 PASS maxabs=0.000e+00
+no SIMT_F2F
+f2f_fp32_t512 PASS maxabs=0.000e+00
+no SIMT_F2F
+f2f_bf16_t128 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=8853 busy=1403 act_min=8 act_med=8 act_max=8
+f2f_bf16_t256 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=9313 busy=1132 act_min=8 act_med=8 act_max=8
+f2f_bf16_t512 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=5778 busy=1014 act_min=8 act_med=8 act_max=8
+SWEEP_DONE

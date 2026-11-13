@@ -1,0 +1,164 @@
+LDS improvement experiments for the double-buffer GEMV (N=2048, K=8, 256t)
+==========================================================================
+Date: 2026-11-13. All numbers 2nd-VF (VF[1]) spans, matching the SV3
+theoretical doc accounting. Baseline = runs/dbl_buf-n2048-k8-t256.
+
+Tooling added
+-------------
+- analyze_lds_trace.py   per-VF opcode counts + per-op busy unions
+- lds_warp_profile.py    LDS busy segments + issue/latency list
+- lds_issue_timeline.py  per-bin LDS issue histogram + full issue list
+
+Baseline diagnosis (dbl_buf, VF[1] span 1070)
+---------------------------------------------
+- LDS busy union 638 for 32784 B -> 25.71 B/cyc (Table 6c). Confirmed.
+- LDS busy = 3 bursts [42-262] [534-600] [720-760]; ~270-tick dead holes
+  where NO LDS is in flight and only 8 FFMA/strip cannot fill them.
+- Issue rate inside a burst collapses 0.85 -> 0.25 LDS/cyc while per-issue
+  latency inflates 27 -> 98 ticks (return-queue saturation, 8 warps only).
+- Only 2 uint2 loads in flight per thread (one strip ahead).
+
+Experiment 1: dbl_buf_quad (4 strips in flight) - PASS, measured
+----------------------------------------------------------------
+- Kernel: build_ub_dbl_buf_quad (Experiment 6). Prolog loads strips 0..2,
+  the single steady step prefetches strip 3 before mac+store of strip 0,
+  epilog macs strips 1..3. 8 uint2 in flight per thread.
+- Correctness: PASS maxabs=1.192e-07.
+- VF[1] span 1070 -> 958 (-10.5%). LDS busy 638 -> 573.
+- LDS bursts merged into ONE contiguous band [44-500]; dead holes gone.
+- But mid-band issue rate still 0.25/cyc, latency still ~98: the band is
+  bound by the A layout, not by prefetch depth. See experiment 2.
+- Rates: LDS 32784/573 = 57.2 B/cyc busy-union; VF 2048/958 = 2.14 el/cyc
+  (vs dbl_buf 0.96); est full-case 1916 vs 2140 (-10.5%).
+- Decode line: launches=2 VF=2470 el/cyc=0.83 mac/cyc=6.63 IPC=0.71.
+
+Experiment 2: dbl_buf_quad_raw (pure LDS band, F2F moved to mac band)
+---------------------------------------------------------------------
+- Kernel was build_ub_dbl_buf_quad_raw (removed after measurement): af
+  fragments kept raw fp16 (no T.Cast at load), casts moved into the mac
+  bands. PASS maxabs=1.192e-07.
+- VF[1] span 1006 (worse than quad's 958): moving F2F out of the band
+  exploded it into 288 scalar F2F + 144 SHFI + 128 LOP3 unpack ops.
+- KEY FINDING: LDS busy stayed 573 with a PURE band -> the band is bound
+  by the load pattern itself, not issue-slot competition with F2F.
+
+Root cause (both experiments)
+-----------------------------
+- Row-per-thread A layout: thread tid loads row tid, so lane word
+  addresses stride 16 B (row bytes). 32 lanes x 16 B = 512 B span per
+  issue = 16 bank periods (32 B each) -> ~4x replay per issue. In-kernel
+  band rate: 16400 B / 573 busy = 28.6 B/cyc, the same class the pure
+  microbench lds_v4_probe measures at 31.21 B/cyc for 16-B-per-lane
+  patterns (lds_fp32_vs_bf16.md section 4.3).
+- The pure-bench peaks (81.11 B/cyc small tile, 76.38 size-scaled) all
+  use 4-B lane strides (one 128 B bank period per issue, no replay).
+- Any source-level "thread loads chunk c(tid)" remap yields IDENTICAL
+  lane chunk indices for 16-B rows (pairing threads within a row or
+  giving threads whole rows produces the same address sequence), so the
+  16-B stride is structural at K=8 fp16 without a buffer relayout.
+
+Experiment 3: build_ub_vfsplit (strided relayout via exchange buffer)
+----------------------------------------------------------------------
+Design: two VFs per slab. VF A loads A with the pure-bench strided word
+pattern (lane L reads word L + threads*i, 4-B lane stride, 128 B
+contiguous per issue) and stores per-word pair-products to a flat
+exchange buffer p_ub[w]; VF B reloads lane-per-row and finishes each dot.
+The strided store lands CONTIGUOUSLY in UB (store word address == load
+word index), so no extra transpose pass is needed.
+
+RESULT: does NOT compile. Ascend layout inference rejects both halves:
+- store-side  p_ub[w // 4, w % 4] (2-D row-major):
+    InternalError ParallelOp RecordBufferAccess / ProveFragmentContains
+    -> InverseAffineIterMap "CanProveEqual(abs(scale), 1) is false"
+    (also earlier StructuralEqual index-consistency ICHECKs force every
+    buffer access inside one T.Parallel to share ONE index pattern,
+    which bans per-lane even/odd unpack fusion)
+- reload-side p_ub[base + n*4 + q] (flat, lane stride 4):
+    same InverseAffineIterMap scale!=1 ICHECK.
+Both halves of the transpose need layout support the inverter lacks.
+Function kept in kernels.py as the record; not in BUILDERS.
+
+Fix options (ranked, after all measurements)
+--------------------------------------------
+1. Quad schedule (DONE, measured): dbl_buf_quad -10.5% VF. Bank it.
+2. Relayout A in UB: blocked by layout inference in the TileLang Ascend
+   dialect today (experiment 3). Would need either (a) compiler support
+   for scale!=1 fragment inverses / div-mod buffer indices, or (b) a
+   hand-written CCE kernel doing the strided load + contiguous store.
+3. Two threads per row: lane stride 16->8 B halves the replay; medium
+   effort, bounded gain (~28.6 -> ~57 B/cyc class), still short of 76.
+4. If LDS B/cyc must rise without kernel surgery: run the VF body at
+   512 threads. LDS size-peak rises 76 -> 96 B/cyc with warps; costs
+   F2F rate (107.79 -> 39.57) — see simt-uarch.md section 6; net loss
+   for this convert-heavy case, kept only as a knob.
+
+Artifacts
+---------
+- runs/dbl_buf_quad-n2048-k8-t256/        kernel + PASS sim.log + npusim trace
+- (removed) runs/dbl_buf_quad_raw-.../    measured, kernel removed
+- kernels.py                      build_ub_dbl_buf_quad (Experiment 6)
+
+================================================================================
+BAR_THREAD_BLOCK REMOVAL (--nosync)  [2026-11-13]
+================================================================================
+Source of the barriers:
+  TileLang auto thread-storage-sync pass inserts asc_syncthreads() wherever
+  threads write a shared UB buffer; codegen_ascend.cc PrintStorageSync emits it.
+  In dbl_buf_quad: 8 per launch (1 per strip boundary, between FFMA and STS).
+  dbl_buf had 24 (3 per strip). None protect real data: out_ub writes are
+  thread-private (base+threadIdx.x); a_ub/x_ub are MTE2-fed with pipe syncs;
+  VF->MTE3 order is enforced by asc_sync_notify/wait in the wrapper.
+
+Knob: pass_configs["tl.disable_thread_storage_sync"] = True
+      (tilelang/transform/pass_config.py; exposed as --nosync flag on
+       compile.py, produces runs/<name>-nosync/)
+
+Measured (dbl_buf_quad n2048 k8 t256, instr.bin decode):
+  barrier count      8 -> 0
+  VF[1] span       958 -> 839 ticks  (-119; barrier arrival was gating STS on
+                                     slowest warp's FFMA chain, cost >> 8 instrs)
+  full-case VF    1916 -> 1678 cycles (2140 -> 1678 = -21.5% vs dbl_buf)
+  el/cyc          1.07 -> 1.22       (1.17x theoretical 1429, was 1.34x)
+  correctness      PASS (1.192e-07), both VFs
+  LDS busy union   573 unchanged (barrier was never the LDS limiter)
+
+Caveat: flag disables ALL auto storage syncs for the build. Safe for this
+kernel family only (no cross-thread VF writes). Opt-in via --nosync; a kernel
+with genuine cross-thread sharing would silently corrupt. NOT folded into
+SV3-theoretical.md yet (user decision 2026-11-13); doc still headlines quad
+at 1916.
+
+================================================================================
+F2F/LDS OVERLAP EXPERIMENTS (--nosync quad base)  [2026-11-13]
+================================================================================
+Question: trace shows F2F bulk starts ~400 ticks, after most of the LDS band
+[44,530]. Can F2F overlap LDS more?
+
+quad_reord (steady = FFMA+STS strip t FIRST, prefetch t+3 LAST):
+  VF0 1134 / VF1 881 (sum 2015). WORSE. CCE sank the stores: STS busy
+  110 -> 358. Compute-first just delayed stores without delaying the LDS
+  trickle (CCE schedules LDS issues early regardless).
+
+quad_ilv (per k-chunk: convert chunk t+3, FFMA chunk t):
+  F2F start 400 -> 260 (overlap achieved as designed), but VF0 1124 /
+  VF1 837 (sum 1961) ~= stock 839. Span floor not moved: the LDS trickle
+  itself (bank replay, issues spread [44,530]) is the wall, not F2F order.
+
+quad_acc (6-way ILP chains: fragments split into 4-col halves, one acc per
+  half; steady mac 2 chains depth-4, epilog 6 chains advanced in one k loop):
+  VF0 1096 -> 853, VF1 850; sum 1935 -> 1703 (-12% for N=2048's 2 VFs).
+  Steady-state (doc convention steady x slabs) 1678 -> 1700: wash, because
+  VF1 is pinned at LDS-end (~530) + ~320 post-LDS compute/store tail, which
+  did not compress even at 6-way ILP. Real per-launch time for 2-slab case
+  improves; large-N steady state does not.
+  Note: even/odd index split inside one T.Parallel body is rejected by the
+  structural-equal check ((n, kb*2+1) vs (n, kb*2)); splitting the FRAGMENTS
+  themselves is the workaround that compiles.
+
+Verdict: F2F ordering is NOT the limiter. VF1 span ~= 44 (LDS start) + 573
+(LDS trickle) + ~320 (post-LDS compute+store) with or without overlap/ILP.
+Breaking the floor needs the LDS trickle itself faster (bank-conflict
+relayout = vfsplit), which is blocked on layout inference.
+
+New builders in kernels.py: build_ub_quad_reord / build_ub_quad_ilv /
+build_ub_quad_acc (all --nosync, PASS maxabs=1.192e-07).

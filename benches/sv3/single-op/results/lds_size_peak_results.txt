@@ -1,0 +1,6 @@
+# pure strided LDS.b32 size-scaled peaks (lds_pure_burst.asc, LDS_LAYOUT=0)
+# kind threads N WPT issues busy B/cyc iss/cyc
+fp32 256 24576 96 768 1287 76.38 0.597
+fp32 512 49152 96 1536 2049 95.95 0.750
+bf16x2 512 49152 96 1536 2082 94.43 0.738
+# also seen: fp32 1024 49152 -> 97.72 (spill-free); 256t plateaus ~76

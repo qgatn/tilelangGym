@@ -10,13 +10,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-NK = Path(__file__).resolve().parents[1] / "nk"
-sys.path.insert(0, str(NK))
+SCHEDULES = Path(__file__).resolve().parents[1] / "schedules"
+sys.path.insert(0, str(SCHEDULES))
 import plot_charts as pc
 
 OUT = Path(__file__).resolve().parents[1] / "plots"
 CCE_BIN = pc.newest_bin(Path(__file__).resolve().parent)
-TL_BIN = pc.newest_bin(NK / "runs" / "ub-n4096-k32")
+TL_BIN = pc.newest_bin(SCHEDULES / "runs" / "ub-n4096-k32")
 
 
 def shown_rows(ops):

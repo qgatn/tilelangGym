@@ -1,0 +1,24 @@
+pure_ldsk0_t256 OK
+pure_ldsk1_t256 OK
+pure_ldsk2_t256 OK
+pure_ldsk3_t256 OK
+pure_f2fk0_t256 OK
+pure_f2fk1_t256 OK
+pure_f2fk2_t256 OK
+pure_f2fk3_t256 OK
+pure_ffmak0_t256 OK
+pure_ffmak1_t256 OK
+pure_ffmak2_t256 OK
+SWEEP_DONE
+ldsk0 busy=471 issues=27 B/cyc=34.79
+ldsk1 busy=202 issues=27 B/cyc=81.11
+ldsk2 busy=202 issues=27 B/cyc=81.11
+ldsk3 busy=202 issues=27 B/cyc=81.11
+f2fk0 busy=275 issues=8 el/cyc=29.79
+f2fk1 busy=342 issues=8 el/cyc=23.95
+f2fk2 busy=208 issues=8 el/cyc=39.38
+f2fk3 busy=76 issues=8 el/cyc=107.79
+ffmak0 busy=479 issues=11 el/cyc=17.10
+ffmak1 busy=422 issues=12 el/cyc=19.41
+ffmak2 busy=392 issues=11 el/cyc=20.90
+STS (hide32) op=SIMT_STS n=256 span=497 busy=355 act_min=20 act_med=20 act_max=20

@@ -1,0 +1,25 @@
+f2f_A_wpt32_t128 N=4096 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=167 busy=159 act_min=8 act_med=8 act_max=8
+f2f_B_wpt32_t128 N=4096 PASS maxabs=0.000e+00
+op=SIMT_F2F n=64 span=108 busy=108 act_min=8 act_med=8 act_max=8
+f2f_C_wpt32_t128 N=4096 PASS maxabs=0.000e+00
+op=SIMT_F2F n=64 span=77 busy=77 act_min=8 act_med=8 act_max=8
+f2f_D_wpt32_t128 N=4096 PASS maxabs=0.000e+00
+op=SIMT_F2F n=64 span=38 busy=38 act_min=8 act_med=8 act_max=8
+f2f_A_wpt32_t256 N=8192 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=378 busy=275 act_min=8 act_med=8 act_max=8
+f2f_B_wpt32_t256 N=8192 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=290 busy=281 act_min=8 act_med=8 act_max=8
+f2f_C_wpt32_t256 N=8192 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=292 busy=208 act_min=8 act_med=8 act_max=8
+f2f_D_wpt32_t256 N=8192 PASS maxabs=0.000e+00
+op=SIMT_F2F n=128 span=76 busy=76 act_min=8 act_med=8 act_max=8
+f2f_A_wpt32_t512 N=16384 PASS maxabs=0.000e+00
+op=SIMT_F2F n=512 span=874 busy=615 act_min=8 act_med=8 act_max=8
+f2f_B_wpt32_t512 N=16384 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=932 busy=690 act_min=8 act_med=8 act_max=8
+f2f_C_wpt32_t512 N=16384 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=1228 busy=932 act_min=8 act_med=8 act_max=8
+f2f_D_wpt32_t512 N=16384 PASS maxabs=0.000e+00
+op=SIMT_F2F n=256 span=152 busy=152 act_min=8 act_med=8 act_max=8
+WPT32_DONE

@@ -1,0 +1,26 @@
+# 2026-11-13 LDS variants sweep (all PASS, busy-union SIMT_LDS, N=49152 units → 196608 B unless noted)
+# baseline = lds_pure_burst.asc strided
+fp32 512t v0 (baseline repro)      busy=2070  94.98 B/cyc
+fp32 512t v1 (pointer walk)        busy=2070  94.98 B/cyc   — identical op mix, CSE'd
+fp32 512t v2 (unroll x4 strides)   busy=2049  95.95 B/cyc   — == prior peak
+bf16x2 512t v0                     busy=2070  94.98 B/cyc
+bf16x2 512t v1 (pointer walk)      busy=2070  94.98 B/cyc
+fp32 1024t v0                      busy=2012  97.72 B/cyc   ← best fp32
+fp32 1024t v1 (pointer walk)       busy=2012  97.72 B/cyc
+fp32 2048t (mlp bench)             busy=6444  30.51 B/cyc   — >1024t collapses (scheduling)
+bf16x2 2048t (mlp bench)           busy=6422  30.61 B/cyc
+bf16x2 1024t (mlp bench)           busy=2012  97.72 B/cyc   ← bf16x2 == fp32 at 1024t!
+bf16x2 512t (mlp bench)            busy=2083  94.39 B/cyc
+fp32/bf16x2 512t N=61440           busy=2672  91.98 B/cyc   — larger N softens @512
+fp32/bf16x2 1024t N=61440          busy=2565  95.81 B/cyc   — softens too
+float4-per-lane probe 512t         busy=6300  31.21 B/cyc   — med act 98: bank conflicts
+pre-addressed (addr[] hoist) 512t  busy=2070  94.98 B/cyc   — CSE rematerializes IADD_I
+pre-addressed 1024t                busy=2012  97.72 B/cyc   — same, no change
+
+# 2026-11-13 low-T / warp-scaling probe (lds_pure_burst.asc, N=49152 units unless noted)
+fp32 256t N=12288 WPT48   busy=683   71.96 B/cyc   — sparser WPT does not help @256
+fp32 256t N=16384 WPT64   busy=860   76.20 B/cyc   — same plateau ~76
+fp32 384t N=49152         busy=2415  81.41 B/cyc   — bf16x2 identical (2415)
+fp32 512t N=49152         busy=2049  95.95 B/cyc   — prior peak (ref)
+fp32 768t N=49152         busy=2026  97.04 B/cyc   — bf16x2 identical (2026)
+fp32 1024t N=49152        busy=2012  97.72 B/cyc   — best (ref)

@@ -1,0 +1,9 @@
+# 2026-11-13 1024-thread sweep (pure_burst.asc / hide32.asc; busy-union on target opcode)
+# npusim teardown segfault (exit 139 / double-free) is a known stub teardown issue; traces valid.
+# F2F outputs verified exact (0/32768 mismatches) in a direct (non-record) run.
+f2f S1 scalar  1024t  n=1024 busy=2726  12.02 el/cyc iss=0.376   — worse than 256t (34.x band)
+f2f S3 word    1024t  n=512  busy=1146  28.59 el/cyc iss=0.447
+f2f S4 barrier 1024t  n=512  busy=1069  30.65 el/cyc iss=0.479   — best @1024, still < 256t S4 107.79
+ffma S1 scalar 1024t  n=256  busy=959    8.54 el/cyc iss=0.267
+ffma S3 barrier 1024t n=256  busy=315   26.01 el/cyc iss=0.813   — close to serial 32.38; < 256t S3 20.90* (that was lower-bound)
+sts  hide32    1024t  n=1024 busy=1316   99.60 B/cyc iss=0.778   — slightly above 256t 92.30

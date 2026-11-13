@@ -1,0 +1,13 @@
+ffma_packed_t128 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=831 busy=624 act_min=12 act_med=12 act_max=12
+no SIMT_FFMA_I
+  no SIMT_FFMA_I
+ffma_packed_t256 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=568 busy=422 act_min=12 act_med=12 act_max=12
+no SIMT_FFMA_I
+  no SIMT_FFMA_I
+ffma_packed_t512 PASS maxabs=0.000e+00
+op=SIMT_FFMA n=256 span=775 busy=566 act_min=12 act_med=12 act_max=12
+no SIMT_FFMA_I
+  no SIMT_FFMA_I
+SWEEP_DONE
