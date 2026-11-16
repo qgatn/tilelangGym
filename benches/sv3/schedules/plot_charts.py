@@ -27,6 +27,9 @@ OFF_ROWS = {
     "SIMT_IADD", "SIMT_IADD_I", "SIMT_LEA", "SIMT_S2R", "SIMT_SHFI",
     "SIMT_BRANCH", "SIMT_ISETP", "SIMT_ISETP_I", "SIMT_END", "SIMT_MOVI",
     "SIMT_MOV", "SIMT_PLOP3", "SIMT_FSETP", "SIMT_LOP3",
+    # Full-window sync flags drown every other row on long ANALYSIS spans.
+    "SET_FLAG", "WAIT_FLAG", "SIMT_SET_FLAG", "SIMT_WAIT_FLAG",
+    "RV_SET_FLAG", "RV_WAIT_FLAG",
     "RV_SLDI", "RV_SSTI", "RV_VMOV", "RV_SMOV", "RV_SMOVI", "RV_SMOVK",
     "RV_PSET", "RV_SEND", "RV_VCI", "RV_VLOOP",
     "RV_SADD", "RV_SSHLI", "RV_SZEROEXT",
@@ -45,46 +48,69 @@ def newest_bin(case: Path):
     return bins[0]
 
 
+def opcode_id(dec):
+    match = MN.search(dec or "")
+    return (int(match.group(1)), match.group(2)) if match else (None, None)
+
+
 def windows(path: Path, vf_name: str):
+    """Return (span, ivals) where ivals are (issue_rel, done_rel, op) sorted by issue."""
     rows = [row for row in decode_instr_logs_from_file(path) if row.core == 0 and row.sub == 1]
-    issues, dones = {}, {}
+    vf_issues, vf_dones = {}, {}
+    all_issues, all_dones = {}, {}
     for row in rows:
-        op = opcode(row.dec)
+        ident, op = opcode_id(row.dec)
+        if op is None:
+            continue
+        key = (row.pc, ident, op)
+        if row.is_popped == 1 and key not in all_issues:
+            all_issues[key] = row.time
+        elif row.is_popped == 0:
+            all_dones[key] = row.time
         if op != vf_name:
             continue
-        key = (row.pc, op)
-        if row.is_popped == 1 and key not in issues:
-            issues[key] = row.time
+        vkey = (row.pc, op)
+        if row.is_popped == 1 and vkey not in vf_issues:
+            vf_issues[vkey] = row.time
         elif row.is_popped == 0:
-            dones[key] = row.time
-    spans = []
-    for key, start in issues.items():
-        if key in dones:
-            spans.append((start, dones[key]))
-    spans.sort()
-    ops = []
-    cursor = 0
-    for start, done in spans:
-        for row in rows:
-            if row.is_popped != 1:
-                continue
-            op = opcode(row.dec)
-            if op is None or op == vf_name or not (start <= row.time <= done):
-                continue
-            ops.append((cursor + row.time - start, op))
-        cursor += done - start
-    return cursor, ops
+            vf_dones[vkey] = row.time
+    spans = sorted(
+        (vf_issues[k], vf_dones[k]) for k in vf_issues if k in vf_dones
+    )
+    if not spans:
+        return 0, []
+    # First VF only for ANALYSIS charts (first launch)
+    start0, done0 = spans[0]
+    ivals = []
+    for key, start in all_issues.items():
+        op = key[2]
+        if op == vf_name or key not in all_dones:
+            continue
+        end = all_dones[key]
+        if end < start0 or start > done0:
+            continue
+        lo = max(start, start0) - start0
+        hi = min(end, done0) - start0
+        if hi < lo:
+            continue
+        ivals.append((lo, hi, op))
+    ivals.sort(key=lambda x: x[0])
+    last = max((hi for _, hi, _ in ivals), default=0)
+    return last + 1, ivals
 
 
 def draw_instr(case: Path, title: str, out_name: str, kind: str):
     vf_name = "VF" if kind == "simd" else "VF_SIMT"
-    ticks, ops = windows(newest_bin(case), vf_name)
-    counts = Counter(op for _, op in ops)
+    ticks, ivals = windows(newest_bin(case), vf_name)
+    counts = Counter(op for _, _, op in ivals)
     shown = [
-        (op.removeprefix("SIMT_").removeprefix("RV_"), {op})
-        for op in sorted(counts, key=lambda name: (-counts[name], name))
-        if op not in OFF_ROWS
+        (op.removeprefix("SIMT_").removeprefix("RV_"), {op}, PALETTE[i % len(PALETTE)])
+        for i, op in enumerate(
+            op for op in sorted(counts, key=lambda name: (-counts[name], name))
+            if op not in OFF_ROWS
+        )
     ]
+    # Bars: is_popped=1 → start, is_popped=0 → end; width = end-start+1; later overlaps on top.
     fig = plt.figure(figsize=(10.6, 0.34 * max(len(shown), 1) + 2.1), dpi=200, facecolor="white")
     fig.suptitle(title, x=0.01, ha="left", y=0.98, fontsize=13, fontweight="semibold")
     grid = GridSpec(2, 1, figure=fig, height_ratios=[2.15, 0.95], hspace=0.08, top=0.88, bottom=0.12, left=0.18, right=0.90)
@@ -92,32 +118,40 @@ def draw_instr(case: Path, title: str, out_name: str, kind: str):
     n = len(shown)
     for i in range(n):
         top.axhspan(i - 0.5, i + 0.5, color="#f7f8f9" if i % 2 == 0 else "white", linewidth=0)
-    for i, (label, names) in enumerate(shown):
+    op_to_y = {}
+    for i, (label, names, color) in enumerate(shown):
         y = n - 1 - i
-        ts = [t for t, name in ops if name in names]
-        top.vlines(ts, y - 0.34, y + 0.34, color=PALETTE[i % len(PALETTE)], linewidth=0.7)
-        top.text(ticks * 1.015, y, f"×{len(ts)}", va="center", ha="left", fontsize=8.5, color="#444", clip_on=False)
-    top.set_yticks(range(n), [label for label, _ in reversed(shown)])
+        for op in names:
+            op_to_y[op] = (y, color)
+        n_op = sum(1 for _, _, op in ivals if op in names)
+        top.text(ticks * 1.015, y, f"×{n_op}", va="center", ha="left", fontsize=8.5, color="#444", clip_on=False)
+    for z, (lo, hi, op) in enumerate(ivals):
+        if op not in op_to_y:
+            continue
+        y, color = op_to_y[op]
+        top.barh(y, hi - lo + 1, left=lo, height=0.62, color=color,
+                 edgecolor="none", linewidth=0, align="center", zorder=2 + z)
+    top.set_yticks(range(n), [label for label, _, _ in reversed(shown)])
     top.set_xlim(0, ticks)
     top.set_ylim(-0.55, n - 0.45)
     top.tick_params(axis="x", labelbottom=False, length=0)
     width = 20
     bins = max((ticks + width - 1) // width, 1)
     bucket = [0] * bins
-    for t, _ in ops:
-        if 0 <= t < ticks:
-            bucket[t // width] += 1
+    for lo, _, _ in ivals:
+        if 0 <= lo < ticks:
+            bucket[lo // width] += 1
     xs, ys = [], []
     for i, count in enumerate(bucket):
-        lo, hi = i * width, min(ticks, (i + 1) * width)
-        xs.append(lo + (hi - lo) / 2)
-        ys.append(count / (hi - lo) if hi > lo else 0)
+        a, b = i * width, min(ticks, (i + 1) * width)
+        xs.append(a + (b - a) / 2)
+        ys.append(count / (b - a) if b > a else 0)
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, ticks)
     bot.set_ylim(0, max(4, (max(ys) if ys else 1) + 0.4))
     bot.set_ylabel("IPC")
-    bot.set_xlabel("tick inside the VF window")
+    bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)
     for ax in (top, bot):
@@ -127,7 +161,7 @@ def draw_instr(case: Path, title: str, out_name: str, kind: str):
     out = OUT / out_name
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
-    print(f"VF {ticks}  issues {len(ops)}  IPC {len(ops) / ticks:.2f}  -> {out.name}")
+    print(f"VF {ticks}  ivals {len(ivals)}  IPC {len(ivals) / ticks:.2f}  -> {out.name}")
 
 
 def draw_n():

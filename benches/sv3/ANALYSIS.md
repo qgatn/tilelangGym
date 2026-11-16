@@ -640,11 +640,11 @@ Source `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Each warp owns 256 outputs. La
 
 The buffer window is 2.40× the CCE window. Buffer `LDS` issues every 32 cycles, median active time 652. CCE `LDS` issues every 13 cycles and finishes in 27. CCE uses `FMUL` and `REDUX` in place of `FFMA`.
 
-**Figure 4.** Buffer instructions, first launch. `N = 4096`, `K = 32`, 256 threads.
+**Figure 4.** Buffer instructions, first launch, first 2000 ticks. `N = 4096`, `K = 32`, 256 threads.
 
 ![Buffer instructions, first launch](plots/cmp_tilelang_zoom.png)
 
-**Figure 5.** CCE instructions, first launch. `N = 4096`, `K = 32`, 256 threads.
+**Figure 5.** CCE instructions, first launch, first 2000 ticks. `N = 4096`, `K = 32`, 256 threads.
 
 ![CCE instructions, first launch](plots/cmp_cce_zoom.png)
 
@@ -726,7 +726,7 @@ SIMD is the lower VF on every row. Bold is that VF.
 Run these from `benches/sv3/schedules`. The case directory is `runs/<kind>-n<N>-k<K>`. A thread launch other than 256 is `runs/thread-n<N>-k<K>-t<threads>`.
 
 ```bash
-python compile.py thread|ub|warp|simd N K [threads]
+python compile_legacy.py thread|ub|warp|simd N K [threads]
 npusim record -s Ascend950 -o runs/<case>/npusim -g -n 0 "python launch.py runs/<case>/kernel.so N K"
 python decode.py <instr.bin> N K thread|simd
 ```

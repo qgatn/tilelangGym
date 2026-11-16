@@ -1,4 +1,8 @@
-"""IPC and instruction charts for the TileLang buffer GEMV and the CCE GEMV."""
+"""IPC and instruction charts for the TileLang buffer GEMV and the CCE GEMV.
+
+Bars: is_popped=1 → start, is_popped=0 → end (width end-start+1); later overlaps
+on top, no borders. SET_FLAG/WAIT_FLAG rows stay off (full-window sync noise).
+"""
 
 import sys
 from collections import Counter
@@ -10,57 +14,47 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-SCHEDULES = Path(__file__).resolve().parents[1] / "schedules"
-sys.path.insert(0, str(SCHEDULES))
+SCHED = Path(__file__).resolve().parents[1] / "schedules"
+sys.path.insert(0, str(SCHED))
 import plot_charts as pc
 
 OUT = Path(__file__).resolve().parents[1] / "plots"
 CCE_BIN = pc.newest_bin(Path(__file__).resolve().parent)
-TL_BIN = pc.newest_bin(SCHEDULES / "runs" / "ub-n4096-k32")
+TL_BIN = pc.newest_bin(SCHED / "runs" / "ub-n4096-k32")
 
 
-def shown_rows(ops):
-    counts = Counter(op for _, op in ops)
+def shown_rows(ivals):
+    counts = Counter(op for _, _, op in ivals)
     return [
-        (op.removeprefix("SIMT_"), {op})
-        for op in sorted(counts, key=lambda name: (-counts[name], name))
-        if op not in pc.OFF_ROWS
+        (op.removeprefix("SIMT_").removeprefix("RV_"), {op}, pc.PALETTE[i % len(pc.PALETTE)])
+        for i, op in enumerate(
+            op for op in sorted(counts, key=lambda name: (-counts[name], name))
+            if op not in pc.OFF_ROWS
+        )
     ]
 
 
-def ipc(ticks, ops, width=20):
+def ipc(ticks, ivals, width=20):
     bins = max((ticks + width - 1) // width, 1)
     bucket = [0] * bins
-    for t, _ in ops:
-        if 0 <= t < ticks:
-            bucket[t // width] += 1
+    for lo, _, _ in ivals:
+        if 0 <= lo < ticks:
+            bucket[lo // width] += 1
     xs, ys = [], []
     for i, count in enumerate(bucket):
-        lo, hi = i * width, min(ticks, (i + 1) * width)
-        xs.append(lo + (hi - lo) / 2)
-        ys.append(count / (hi - lo) if hi > lo else 0)
+        a, b = i * width, min(ticks, (i + 1) * width)
+        xs.append(a + (b - a) / 2)
+        ys.append(count / (b - a) if b > a else 0)
     return xs, ys
 
 
-def first_launch(path):
-    rows = [row for row in pc.decode_instr_logs_from_file(path) if row.core == 0 and row.sub == 1]
-    issues, dones = {}, {}
-    for row in rows:
-        op = pc.opcode(row.dec)
-        if op != "VF_SIMT":
-            continue
-        key = (row.pc, op)
-        if row.is_popped == 1 and key not in issues:
-            issues[key] = row.time
-        elif row.is_popped == 0:
-            dones[key] = row.time
-    spans = sorted(dones[key] - start for key, start in issues.items() if key in dones)
-    return spans[0]
+# Figures 4/5: first 2000 ticks of the first VF (see cce-run.md).
+ZOOM_TICKS = 2000
 
 
 def draw(path, title, out_name, xlim=None):
-    ticks, ops = pc.windows(path, "VF_SIMT")
-    rows = shown_rows(ops)
+    ticks, ivals = pc.windows(path, "VF_SIMT")
+    rows = shown_rows(ivals)
     view = ticks if xlim is None else min(ticks, xlim)
     fig = plt.figure(figsize=(10.6, 0.34 * max(len(rows), 1) + 2.1), dpi=160, facecolor="white")
     fig.suptitle(title, x=0.01, ha="left", y=0.98, fontsize=13, fontweight="semibold")
@@ -69,16 +63,27 @@ def draw(path, title, out_name, xlim=None):
     n = len(rows)
     for i in range(n):
         top.axhspan(i - 0.5, i + 0.5, color="#f7f8f9" if i % 2 == 0 else "white", linewidth=0)
-    for i, (label, names) in enumerate(rows):
+    op_to_y = {}
+    for i, (label, names, color) in enumerate(rows):
         y = n - 1 - i
-        ts = [t for t, name in ops if name in names and t < view]
-        top.vlines(ts, y - 0.34, y + 0.34, color=pc.PALETTE[i % len(pc.PALETTE)], linewidth=0.8)
-        top.text(view * 1.01, y, f"×{len(ts)}", va="center", ha="left", fontsize=8.5, color="#444", clip_on=False)
-    top.set_yticks(range(n), [label for label, _ in reversed(rows)])
+        for op in names:
+            op_to_y[op] = (y, color)
+        n_op = sum(1 for lo, _, op in ivals if op in names and lo < view)
+        top.text(view * 1.01, y, f"×{n_op}", va="center", ha="left", fontsize=8.5, color="#444", clip_on=False)
+    for z, (lo, hi, op) in enumerate(ivals):
+        if op not in op_to_y or lo >= view:
+            continue
+        y, color = op_to_y[op]
+        hi_c = min(hi, view - 1)
+        if hi_c < lo:
+            continue
+        top.barh(y, hi_c - lo + 1, left=lo, height=0.62, color=color,
+                 edgecolor="none", linewidth=0, align="center", zorder=2 + z)
+    top.set_yticks(range(n), [label for label, _, _ in reversed(rows)])
     top.set_xlim(0, view)
     top.set_ylim(-0.55, n - 0.45)
     top.tick_params(axis="x", labelbottom=False, length=0)
-    xs, ys = ipc(ticks, ops)
+    xs, ys = ipc(ticks, ivals)
     xs = [x for x in xs if x <= view]
     ys = ys[: len(xs)]
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
@@ -86,7 +91,7 @@ def draw(path, title, out_name, xlim=None):
     bot.set_xlim(0, view)
     bot.set_ylim(0, max(4, (max(ys) if ys else 1) + 0.4))
     bot.set_ylabel("IPC")
-    bot.set_xlabel("tick inside the VF window")
+    bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)
     for ax in (top, bot):
@@ -96,17 +101,25 @@ def draw(path, title, out_name, xlim=None):
     out = OUT / out_name
     fig.savefig(out, dpi=160, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
-    print(f"{out}  VF {ticks}  IPC {len(ops) / ticks:.2f}")
+    print(f"{out}  VF {ticks}  IPC {len(ivals) / ticks:.2f}")
 
 
 def main():
     OUT.mkdir(exist_ok=True)
     draw(TL_BIN, "TileLang buffer, N = 4096, K = 32, 256 threads, VF 132303", "cmp_tilelang.png")
     draw(CCE_BIN, "CCE, N = 4096, K = 32, 256 threads, VF 55100", "cmp_cce.png")
-    tl_first = first_launch(TL_BIN)
-    cce_first = first_launch(CCE_BIN)
-    draw(TL_BIN, f"TileLang buffer, first launch, {tl_first} ticks", "cmp_tilelang_zoom.png", xlim=tl_first)
-    draw(CCE_BIN, f"CCE, first launch, {cce_first} ticks", "cmp_cce_zoom.png", xlim=cce_first)
+    draw(
+        TL_BIN,
+        f"TileLang buffer, first launch, first {ZOOM_TICKS} ticks",
+        "cmp_tilelang_zoom.png",
+        xlim=ZOOM_TICKS,
+    )
+    draw(
+        CCE_BIN,
+        f"CCE, first launch, first {ZOOM_TICKS} ticks",
+        "cmp_cce_zoom.png",
+        xlim=ZOOM_TICKS,
+    )
 
 
 if __name__ == "__main__":

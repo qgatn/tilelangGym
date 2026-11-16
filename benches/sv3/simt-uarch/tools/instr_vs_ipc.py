@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Instruction rows plus the IPC line, from one instr.bin.
+"""Opcode activity chart: one row per opcode, bars from issue → completion.
 
-One row per opcode found in the VF window. --bin sets the IPC bin width in ticks.
-Adds --label so charts get a figure number and name: "Figure 3. LDS packed v2, 256 threads".
+Each instruction instance is paired by (pc, id, opcode):
+  is_popped=1 → start (instr_popped_log)
+  is_popped=0 → end   (instr_log)
+Bar spans [start, end] inclusive (drawn to end+1 so the last cycle is visible).
+Overlapping bars on the same row are drawn in issue order — later starts on top.
+
+IPC line = issues / tick (unchanged meaning). --vf selects the VF launch.
 """
+
+from __future__ import annotations
 
 import argparse
 import re
@@ -12,6 +19,7 @@ from collections import Counter
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -28,8 +36,13 @@ PALETTE = [
 
 
 def opcode(dec):
-    m = MN.search(dec)
+    m = MN.search(dec or "")
     return m.group(2) if m else None
+
+
+def opcode_id(dec):
+    m = MN.search(dec or "")
+    return (int(m.group(1)), m.group(2)) if m else (None, None)
 
 
 def vf_spans(rows, vf_name):
@@ -45,33 +58,59 @@ def vf_spans(rows, vf_name):
     return list(zip(starts[:n], dones[:n]))
 
 
+def pair_intervals(rows, vf_name):
+    """Return list of (issue, done, op) for every completed instruction."""
+    issues, dones = {}, {}
+    for r in rows:
+        ident, op = opcode_id(r.dec)
+        if op is None:
+            continue
+        key = (r.pc, ident, op)
+        if r.is_popped == 1 and key not in issues:
+            issues[key] = r.time
+        elif r.is_popped == 0:
+            dones[key] = r.time
+    out = []
+    for key, start in issues.items():
+        if key[2] == vf_name or key not in dones:
+            continue
+        out.append((start, dones[key], key[2]))
+    out.sort(key=lambda x: x[0])  # issue order → later overlaps draw on top
+    return out
+
+
 def window(path, kind, vf_idx=0):
     vf_name = "VF_SIMT" if kind == "simt" else "VF"
     rows = [r for r in decode_instr_logs_from_file(Path(path)) if r.core == 0 and r.sub == 1]
     spans = vf_spans(rows, vf_name)
     if not spans:
         raise SystemExit(f"no {vf_name} windows found")
-    if vf_idx < 0 or vf_idx >= len(spans):
-        raise SystemExit(f"--vf {vf_idx} out of range (launches={len(spans)})")
-    issue, done = spans[vf_idx]
-    vf_ticks = done - issue
-    ops = []
-    for r in rows:
-        if r.is_popped != 1:
+    # vf_idx == -1 → full window from first VF issue to last VF completion
+    if vf_idx == -1:
+        issue0, done0 = spans[0][0], spans[-1][1]
+    else:
+        if vf_idx < 0 or vf_idx >= len(spans):
+            raise SystemExit(f"--vf {vf_idx} out of range (launches={len(spans)}; use -1 for full)")
+        issue0, done0 = spans[vf_idx]
+    vf_ticks = done0 - issue0
+    ivals = []
+    for start, end, op in pair_intervals(rows, vf_name):
+        if end < issue0 or start > done0:
             continue
-        op = opcode(r.dec)
-        if op is None or op == vf_name:
+        # clip to VF window, relative ticks; keep inclusive end
+        lo = max(start, issue0) - issue0
+        hi = min(end, done0) - issue0
+        if hi < lo:
             continue
-        if issue <= r.time <= done:
-            ops.append((r.time - issue, op))
-    # Clip the plot to the last issue — VF drain after that is empty axis.
-    last = max((t for t, _ in ops), default=0)
+        ivals.append((lo, hi, op))
+    # clip axis to last completion inside the window
+    last = max((hi for _, hi, _ in ivals), default=0)
     span = last + 1
-    return vf_ticks, span, ops
+    return vf_ticks, span, ivals
 
 
-def rows_from(ops):
-    counts = Counter(op for _, op in ops)
+def rows_from(ivals):
+    counts = Counter(op for _, _, op in ivals)
     rows = []
     for i, op in enumerate(sorted(counts, key=lambda name: (-counts[name], name))):
         label = op.removeprefix("RV_").removeprefix("SIMT_")
@@ -79,22 +118,25 @@ def rows_from(ops):
     return rows
 
 
-def ipc_line(ops, ticks, width):
+def ipc_line(ivals, ticks, width):
+    """Issue-rate IPC (one count per instruction at its issue tick)."""
     n = (ticks + width - 1) // width
-    counts = [0] * n
-    for t, _ in ops:
-        if 0 <= t < ticks:
-            counts[t // width] += 1
+    counts = [0] * max(n, 1)
+    for lo, _, _ in ivals:
+        if 0 <= lo < ticks:
+            counts[lo // width] += 1
     xs, ys = [], []
     for i, c in enumerate(counts):
-        lo, hi = i * width, min(ticks, (i + 1) * width)
-        w = hi - lo
-        xs.append(lo + w / 2)
+        a, b = i * width, min(ticks, (i + 1) * width)
+        w = b - a
+        if w <= 0:
+            continue
+        xs.append(a + w / 2)
         ys.append(c / w)
     return xs, ys
 
 
-def draw(span, ops, rows, title, out, width):
+def draw(span, ivals, rows, title, out, width):
     fig = plt.figure(figsize=(10.6, 0.34 * len(rows) + 2.1), dpi=200, facecolor="white")
     fig.suptitle(title, x=0.01, ha="left", y=0.98, fontsize=13, fontweight="semibold")
     gs = GridSpec(2, 1, figure=fig, height_ratios=[2.15, 0.95], hspace=0.08,
@@ -103,34 +145,53 @@ def draw(span, ops, rows, title, out, width):
     n = len(rows)
     for i in range(n):
         top.axhspan(i - 0.5, i + 0.5, color="#f7f8f9" if i % 2 == 0 else "white", linewidth=0)
+
+    # draw in issue order so later-starting overlaps sit on top
+    op_to_y = {}
     for i, (label, names, color) in enumerate(rows):
         y = n - 1 - i
-        ts = [t for t, op in ops if op in names]
-        top.vlines(ts, y - 0.34, y + 0.34, color=color, linewidth=0.7)
-        top.text(span * 1.015, y, f"×{len(ts)}", va="center", ha="left", fontsize=8.5, color="#444", clip_on=False)
+        for op in names:
+            op_to_y[op] = (y, color)
+        n_op = sum(1 for _, _, op in ivals if op in names)
+        top.text(span * 1.015, y, f"×{n_op}", va="center", ha="left",
+                 fontsize=8.5, color="#444", clip_on=False)
+
+    for z, (lo, hi, op) in enumerate(ivals):
+        if op not in op_to_y:
+            continue
+        y, color = op_to_y[op]
+        # inclusive end: bar covers cycles lo..hi
+        top.barh(y, hi - lo + 1, left=lo, height=0.62, color=color,
+                 edgecolor="none", linewidth=0, align="center", zorder=2 + z)
+
     top.set_yticks(range(n), [r[0] for r in reversed(rows)])
     top.set_xlim(0, span)
     top.set_ylim(-0.55, n - 0.45)
     top.tick_params(axis="x", labelbottom=False, length=0)
-    xs, ys = ipc_line(ops, span, width)
+
+    xs, ys = ipc_line(ivals, span, width)
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, span)
-    bot.set_ylim(0, max(4, max(ys) + 0.4) if ys else 4)
+    bot.set_ylim(0, max(4, (max(ys) if ys else 0) + 0.4))
     bot.set_ylabel("IPC")
-    bot.set_xlabel("tick (to last issue)")
+    bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)
     for ax in (top, bot):
         ax.tick_params(length=0, labelsize=9)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
+    out = Path(out)
+    if out.suffix != ".png":
+        out = out.with_suffix(".png")
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.08)
-    print(f"span {span}  issues {len(ops)}  IPC {len(ops) / span:.2f}  -> {out}")
+    plt.close(fig)
+    print(f"span {span}  ivals {len(ivals)}  IPC {len(ivals) / span:.2f}  -> {out}")
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description="Instruction rows plus the IPC line, from one instr.bin.")
+    p = argparse.ArgumentParser(description="Opcode rows with issue→completion bars.")
     p.add_argument("instr")
     p.add_argument("kind", choices=("simd", "simt"))
     p.add_argument("out")
@@ -140,13 +201,13 @@ def main(argv):
     args = p.parse_args(argv[1:])
     if args.bin < 1:
         p.error("--bin must be a positive number of ticks")
-    vf_ticks, span, ops = window(args.instr, args.kind, args.vf)
-    rows = rows_from(ops)
+    vf_ticks, span, ivals = window(args.instr, args.kind, args.vf)
+    rows = rows_from(ivals)
     for label, names, _ in rows:
-        print(f"{label} {sum(op in names for _, op in ops)}")
+        print(f"{label} {sum(1 for _, _, op in ivals if op in names)}")
     title = (f"{args.label}  ·  span {span} (VF {vf_ticks})" if args.label
              else f"{args.kind.upper()} instructions  ·  span {span} (VF {vf_ticks})")
-    draw(span, ops, rows, title, args.out, args.bin)
+    draw(span, ivals, rows, title, args.out, args.bin)
     return 0
 
 
