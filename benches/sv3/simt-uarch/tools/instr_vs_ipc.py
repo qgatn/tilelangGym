@@ -7,7 +7,8 @@ Each instruction instance is paired by (pc, id, opcode):
 Bar spans [start, end] inclusive (drawn to end+1 so the last cycle is visible).
 Overlapping bars on the same row are drawn in issue order — later starts on top.
 
-IPC line = issues / tick (unchanged meaning). --vf selects the VF launch.
+Only RVEC* pipes (RVECEX/RVECLD/RVECST/…) — drops MTE/VEC/PUSHQ/FLOWCTRL/SCALAR.
+IPC line = RVEC issues / tick. --vf selects the VF launch.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ sys.path.insert(0, CANN)
 from cannsim.core.public.instr_decoder import decode_instr_logs_from_file
 
 MN = re.compile(r"\(ID:\s*(\d+)\)\s+([A-Z0-9_]+)")
+PIPE = re.compile(r"\)\s+([A-Z0-9]+)\s+:")
 PALETTE = [
     "#1f4e79", "#8fb4d4", "#1a7a7a", "#e07a1f", "#1b5e20", "#7cb342",
     "#5c4e78", "#c45c26", "#3d5a80", "#6b4c7a", "#b5b5b5", "#888888",
@@ -45,6 +47,11 @@ def opcode_id(dec):
     return (int(m.group(1)), m.group(2)) if m else (None, None)
 
 
+def is_rvec(dec):
+    m = PIPE.search(dec or "")
+    return bool(m and m.group(1).startswith("RVEC"))
+
+
 def vf_spans(rows, vf_name):
     starts, dones = [], []
     for r in rows:
@@ -59,8 +66,8 @@ def vf_spans(rows, vf_name):
 
 
 def pair_intervals(rows, vf_name):
-    """Return list of (issue, done, op) for every completed instruction."""
-    issues, dones = {}, {}
+    """Return list of (issue, done, op) for every completed RVEC* instruction."""
+    issues, dones, rvec = {}, {}, set()
     for r in rows:
         ident, op = opcode_id(r.dec)
         if op is None:
@@ -68,11 +75,13 @@ def pair_intervals(rows, vf_name):
         key = (r.pc, ident, op)
         if r.is_popped == 1 and key not in issues:
             issues[key] = r.time
+            if is_rvec(r.dec):
+                rvec.add(key)
         elif r.is_popped == 0:
             dones[key] = r.time
     out = []
     for key, start in issues.items():
-        if key[2] == vf_name or key not in dones:
+        if key[2] == vf_name or key not in dones or key not in rvec:
             continue
         out.append((start, dones[key], key[2]))
     out.sort(key=lambda x: x[0])  # issue order → later overlaps draw on top

@@ -31,6 +31,7 @@ from cannsim.core.public.instr_decoder import decode_instr_logs_from_file
 
 MN = re.compile(r"\(ID:\s*(\d+)\)\s+([A-Z0-9_]+)")
 PC = re.compile(r"PC: (0x[0-9a-f]+)")
+PIPE = re.compile(r"\)\s+([A-Z0-9]+)\s+:")
 PALETTE = [
     "#1f4e79", "#e07a1f", "#1a7a7a", "#1b5e20", "#7cb342", "#5c4e78",
     "#c45c26", "#3d5a80", "#6b4c7a", "#b5b5b5",
@@ -46,6 +47,11 @@ def fields(dec):
     op = m.group(2) if m else None
     pc = p.group(1) if p else None
     return op, pc, ident
+
+
+def is_rvec(dec):
+    m = PIPE.search(dec or "")
+    return bool(m and m.group(1).startswith("RVEC"))
 
 
 def vf_spans(rows):
@@ -87,8 +93,8 @@ def main(argv):
     iss, done = spans[args.vf]
     vf_ticks = done - iss
 
-    # pair issue→completion
-    issues, dones = {}, {}
+    # pair issue→completion (RVEC* body only for rows/IPC)
+    issues, dones, rvec = {}, {}, set()
     for r in rows:
         op, pc, ident = fields(r.dec)
         if op is None:
@@ -96,29 +102,10 @@ def main(argv):
         key = (r.pc, ident, op)
         if r.is_popped == 1 and key not in issues:
             issues[key] = r.time
+            if is_rvec(r.dec):
+                rvec.add(key)
         elif r.is_popped == 0:
             dones[key] = r.time
-
-    # per-PC list of (issue_rel, done_rel, short_op) inside VF, sorted by issue
-    per_pc = defaultdict(list)
-    for key, start in issues.items():
-        if key not in dones:
-            continue
-        op = key[2]
-        if op == "VF_SIMT":
-            continue
-        end = dones[key]
-        if end < iss or start > done:
-            continue
-        lo = max(start, iss) - iss
-        hi = min(end, done) - iss
-        if hi < lo:
-            continue
-        short = op.removeprefix("SIMT_").removeprefix("RV_")
-        # use hex PC string from first matching decode if available; fall back to int
-        pc_key = hex(key[0]) if isinstance(key[0], int) else str(key[0])
-        # Prefer the PC string from the decode text when present
-        per_pc[pc_key].append((lo, hi, short))
 
     # Rebuild per_pc keyed by decode PC string for stable warp inference
     per_pc2 = defaultdict(list)
@@ -126,10 +113,10 @@ def main(argv):
         if r.is_popped != 1:
             continue
         op, pc, ident = fields(r.dec)
-        if op in (None, "VF_SIMT") or pc is None:
+        if op in (None, "VF_SIMT") or pc is None or not is_rvec(r.dec):
             continue
         key = (r.pc, ident, op)
-        if key not in issues or key not in dones:
+        if key not in issues or key not in dones or key not in rvec:
             continue
         start, end = issues[key], dones[key]
         if end < iss or start > done:

@@ -19,21 +19,25 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = ROOT / "plots"
 MN = re.compile(r"\(ID:\s*(\d+)\)\s+([A-Z0-9_]+)")
+PIPE = re.compile(r"\)\s+([A-Z0-9]+)\s+:")
 PALETTE = [
     "#1f4e79", "#c45c26", "#1a7a7a", "#e07a1f", "#1b5e20", "#5c4e78",
     "#3d5a80", "#7cb342", "#6b4c7a", "#8fb4d4", "#888888", "#b5b5b5",
 ]
+# Address math / control on RVEC* — keep off opcode rows (still need RVEC filter).
 OFF_ROWS = {
     "SIMT_IADD", "SIMT_IADD_I", "SIMT_LEA", "SIMT_S2R", "SIMT_SHFI",
     "SIMT_BRANCH", "SIMT_ISETP", "SIMT_ISETP_I", "SIMT_END", "SIMT_MOVI",
     "SIMT_MOV", "SIMT_PLOP3", "SIMT_FSETP", "SIMT_LOP3",
-    # Full-window sync flags drown every other row on long ANALYSIS spans.
-    "SET_FLAG", "WAIT_FLAG", "SIMT_SET_FLAG", "SIMT_WAIT_FLAG",
-    "RV_SET_FLAG", "RV_WAIT_FLAG",
     "RV_SLDI", "RV_SSTI", "RV_VMOV", "RV_SMOV", "RV_SMOVI", "RV_SMOVK",
     "RV_PSET", "RV_SEND", "RV_VCI", "RV_VLOOP",
     "RV_SADD", "RV_SSHLI", "RV_SZEROEXT",
 }
+
+
+def is_rvec(dec):
+    m = PIPE.search(dec or "")
+    return bool(m and m.group(1).startswith("RVEC"))
 
 
 def opcode(dec):
@@ -54,10 +58,13 @@ def opcode_id(dec):
 
 
 def windows(path: Path, vf_name: str):
-    """Return (span, ivals) where ivals are (issue_rel, done_rel, op) sorted by issue."""
+    """Return (span, ivals) where ivals are (issue_rel, done_rel, op) sorted by issue.
+
+    Body rows/IPC use RVEC* pipes only (SIMT and SIMD vector path).
+    """
     rows = [row for row in decode_instr_logs_from_file(path) if row.core == 0 and row.sub == 1]
     vf_issues, vf_dones = {}, {}
-    all_issues, all_dones = {}, {}
+    all_issues, all_dones, rvec = {}, {}, set()
     for row in rows:
         ident, op = opcode_id(row.dec)
         if op is None:
@@ -65,6 +72,8 @@ def windows(path: Path, vf_name: str):
         key = (row.pc, ident, op)
         if row.is_popped == 1 and key not in all_issues:
             all_issues[key] = row.time
+            if is_rvec(row.dec):
+                rvec.add(key)
         elif row.is_popped == 0:
             all_dones[key] = row.time
         if op != vf_name:
@@ -84,7 +93,7 @@ def windows(path: Path, vf_name: str):
     ivals = []
     for key, start in all_issues.items():
         op = key[2]
-        if op == vf_name or key not in all_dones:
+        if op == vf_name or key not in all_dones or key not in rvec:
             continue
         end = all_dones[key]
         if end < start0 or start > done0:

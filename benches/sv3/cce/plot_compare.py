@@ -1,7 +1,7 @@
 """IPC and instruction charts for the TileLang buffer GEMV and the CCE GEMV.
 
 Bars: is_popped=1 → start, is_popped=0 → end (width end-start+1); later overlaps
-on top, no borders. SET_FLAG/WAIT_FLAG rows stay off (full-window sync noise).
+on top, no borders. Only RVEC* pipes (via plot_charts.windows).
 """
 
 import sys
