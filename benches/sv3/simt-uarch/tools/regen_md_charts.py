@@ -61,12 +61,22 @@ def md_refs() -> set[str]:
         t = p.read_text(errors="ignore")
         for m in re.finditer(r"\(plots/([^)]+\.png)\)", t):
             refs.add(m.group(1))
+        # also keep charts named in prose / tables: `plots/foo.png` or `foo.png`
+        for m in re.finditer(r"`(?:plots/)?([A-Za-z0-9_.-]+\.png)`", t):
+            refs.add(m.group(1))
     return refs
 
 
 def main() -> int:
     PLOTS.mkdir(parents=True, exist_ok=True)
     ANALYSIS_PLOTS.mkdir(parents=True, exist_ok=True)
+    # Fresh slate: delete every existing chart PNG before regen.
+    cleared = 0
+    for folder in (PLOTS, ANALYSIS_PLOTS):
+        for png in folder.glob("*.png"):
+            png.unlink()
+            cleared += 1
+    print(f"Cleared {cleared} existing PNGs from {PLOTS.name}/ and {ANALYSIS_PLOTS.name}/")
     missing = []
 
     # ---- SV3-theoretical schedule charts (2nd VF except base) ----

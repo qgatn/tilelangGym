@@ -6,12 +6,14 @@ Each instruction instance is paired by (pc, id, opcode):
 Warp id = k % n_warps on each PC's issue sequence (tick order). Bars that
 overlap are drawn in issue order so later starts sit on top.
 
-IPC line = issues / tick. --vf selects the VF launch.
+Warp IPC line = issues from ALL warps / tick (plus once-per-kernel RVEC).
+--vf selects the VF launch. Contrast with instr_vs_ipc.py (single-warp Instr IPC).
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from collections import Counter, defaultdict
@@ -175,8 +177,9 @@ def main(argv):
     last = max([hi for _, hi, _, _ in events] + [hi for _, hi, _ in ipc_extra] + [0])
     span = last + 1
 
-    title = (f"{args.label}  ·  {n_warps} warps  ·  span {span} (VF {vf_ticks})" if args.label
-             else f"SIMT warps  ·  {n_warps} warps  ·  span {span} (VF {vf_ticks})")
+    title = (f"{args.label}  ·  Warp IPC all {n_warps} warps  ·  span {span} (VF {vf_ticks})"
+             if args.label else
+             f"SIMT warps  ·  Warp IPC all {n_warps} warps  ·  span {span} (VF {vf_ticks})")
     fig = plt.figure(figsize=(10.6, 0.30 * n_warps + 2.1), dpi=200, facecolor="white")
     fig.suptitle(title, x=0.01, ha="left", y=0.98, fontsize=13, fontweight="semibold")
     gs = GridSpec(2, 1, figure=fig, height_ratios=[2.15, 0.85], hspace=0.08,
@@ -212,8 +215,11 @@ def main(argv):
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, span)
-    bot.set_ylim(0, max(4, (max(ys) if ys else 0) + 0.4))
-    bot.set_ylabel("IPC")
+    peak = max(ys) if ys else 0.0
+    ylim = 1.0 if peak <= 1.0 else math.ceil(peak * 2) / 2.0
+    bot.set_ylim(0, ylim)
+    bot.set_yticks([i * 0.5 for i in range(int(round(ylim * 2)) + 1)])
+    bot.set_ylabel(f"Warp IPC (all {n_warps})")
     bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)

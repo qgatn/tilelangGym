@@ -8,15 +8,23 @@ Bar spans [start, end] inclusive (drawn to end+1 so the last cycle is visible).
 Overlapping bars on the same row are drawn in issue order — later starts on top.
 
 Only RVEC* pipes (RVECEX/RVECLD/RVECST/…) — drops MTE/VEC/PUSHQ/FLOWCTRL/SCALAR.
-IPC line = RVEC issues / tick. --vf selects the VF launch.
+
+Instr IPC (SIMT): bars + IPC line use ONE warp only (--warp, default 0).
+  Warp id = k % n_warps on each PC's issue sequence (same inference as warpchart).
+  Once-per-kernel PCs (issue count 1) are dropped — they are not a single warp.
+SIMD: no warp split; IPC = all RVEC issues / tick.
+--vf selects the VF launch.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
+from functools import reduce
+from math import gcd
 from pathlib import Path
 
 import matplotlib
@@ -30,6 +38,7 @@ sys.path.insert(0, CANN)
 from cannsim.core.public.instr_decoder import decode_instr_logs_from_file
 
 MN = re.compile(r"\(ID:\s*(\d+)\)\s+([A-Z0-9_]+)")
+PC = re.compile(r"PC: (0x[0-9a-f]+)")
 PIPE = re.compile(r"\)\s+([A-Z0-9]+)\s+:")
 PALETTE = [
     "#1f4e79", "#8fb4d4", "#1a7a7a", "#e07a1f", "#1b5e20", "#7cb342",
@@ -45,6 +54,11 @@ def opcode(dec):
 def opcode_id(dec):
     m = MN.search(dec or "")
     return (int(m.group(1)), m.group(2)) if m else (None, None)
+
+
+def decode_pc(dec):
+    m = PC.search(dec or "")
+    return m.group(1) if m else None
 
 
 def is_rvec(dec):
@@ -66,8 +80,8 @@ def vf_spans(rows, vf_name):
 
 
 def pair_intervals(rows, vf_name):
-    """Return list of (issue, done, op) for every completed RVEC* instruction."""
-    issues, dones, rvec = {}, {}, set()
+    """Return list of (issue, done, op, pc_str, key) for every completed RVEC* instr."""
+    issues, dones, rvec, pc_of = {}, {}, set(), {}
     for r in rows:
         ident, op = opcode_id(r.dec)
         if op is None:
@@ -77,24 +91,37 @@ def pair_intervals(rows, vf_name):
             issues[key] = r.time
             if is_rvec(r.dec):
                 rvec.add(key)
+                pc = decode_pc(r.dec)
+                if pc:
+                    pc_of[key] = pc
         elif r.is_popped == 0:
             dones[key] = r.time
     out = []
     for key, start in issues.items():
         if key[2] == vf_name or key not in dones or key not in rvec:
             continue
-        out.append((start, dones[key], key[2]))
-    out.sort(key=lambda x: x[0])  # issue order → later overlaps draw on top
+        out.append((start, dones[key], key[2], pc_of.get(key), key))
+    out.sort(key=lambda x: x[0])
     return out
 
 
-def window(path, kind, vf_idx=0):
+def infer_n_warps(per_pc_counts):
+    counts_pc = Counter(c for c in per_pc_counts if c != 1)
+    if not counts_pc:
+        return 1
+    common = [c for c, _ in counts_pc.most_common()]
+    n = reduce(gcd, common)
+    if n <= 1:
+        n = max(counts_pc.items(), key=lambda kv: kv[1])[0]
+    return n
+
+
+def window(path, kind, vf_idx=0, warp=0):
     vf_name = "VF_SIMT" if kind == "simt" else "VF"
     rows = [r for r in decode_instr_logs_from_file(Path(path)) if r.core == 0 and r.sub == 1]
     spans = vf_spans(rows, vf_name)
     if not spans:
         raise SystemExit(f"no {vf_name} windows found")
-    # vf_idx == -1 → full window from first VF issue to last VF completion
     if vf_idx == -1:
         issue0, done0 = spans[0][0], spans[-1][1]
     else:
@@ -102,20 +129,54 @@ def window(path, kind, vf_idx=0):
             raise SystemExit(f"--vf {vf_idx} out of range (launches={len(spans)}; use -1 for full)")
         issue0, done0 = spans[vf_idx]
     vf_ticks = done0 - issue0
-    ivals = []
-    for start, end, op in pair_intervals(rows, vf_name):
+
+    raw = []
+    for start, end, op, pc, _key in pair_intervals(rows, vf_name):
         if end < issue0 or start > done0:
             continue
-        # clip to VF window, relative ticks; keep inclusive end
         lo = max(start, issue0) - issue0
         hi = min(end, done0) - issue0
         if hi < lo:
             continue
-        ivals.append((lo, hi, op))
-    # clip axis to last completion inside the window
+        raw.append((lo, hi, op, pc, start))
+
+    n_warps = 1
+    if kind == "simt":
+        per_pc = defaultdict(list)
+        for lo, hi, op, pc, abs_start in raw:
+            if pc is None:
+                continue
+            per_pc[pc].append((lo, hi, op, abs_start))
+        n_warps = infer_n_warps([len(v) for v in per_pc.values()])
+        bad = {pc: len(v) for pc, v in per_pc.items()
+               if len(v) != 1 and (len(v) % n_warps) != 0}
+        if bad or n_warps <= 1:
+            print(f"note: warp filter unsafe ({len(bad)} bad PCs, n_warps={n_warps}); "
+                  f"Instr IPC keeps all issues")
+            ivals = [(lo, hi, op) for lo, hi, op, _pc, _a in raw]
+            n_warps, warp = 0, None  # signal: not single-warp
+        else:
+            if warp < 0 or warp >= n_warps:
+                raise SystemExit(f"--warp {warp} out of range (n_warps={n_warps})")
+            ivals = []
+            skipped_once = 0
+            for pc, seq in per_pc.items():
+                seq = sorted(seq, key=lambda x: (x[0], x[3]))
+                if len(seq) == 1:
+                    skipped_once += 1
+                    continue  # once-per-kernel — not attributable to one warp
+                for k, (lo, hi, op, _) in enumerate(seq):
+                    if (k % n_warps) == warp:
+                        ivals.append((lo, hi, op))
+            ivals.sort(key=lambda x: x[0])
+            if skipped_once:
+                print(f"note: dropped {skipped_once} once-per-kernel PC(s) from single-warp view")
+    else:
+        ivals = [(lo, hi, op) for lo, hi, op, _pc, _a in raw]
+
     last = max((hi for _, hi, _ in ivals), default=0)
     span = last + 1
-    return vf_ticks, span, ivals
+    return vf_ticks, span, ivals, n_warps, warp if kind == "simt" else None
 
 
 def rows_from(ivals):
@@ -145,7 +206,7 @@ def ipc_line(ivals, ticks, width):
     return xs, ys
 
 
-def draw(span, ivals, rows, title, out, width):
+def draw(span, ivals, rows, title, out, width, ylabel="Instr IPC"):
     fig = plt.figure(figsize=(10.6, 0.34 * len(rows) + 2.1), dpi=200, facecolor="white")
     fig.suptitle(title, x=0.01, ha="left", y=0.98, fontsize=13, fontweight="semibold")
     gs = GridSpec(2, 1, figure=fig, height_ratios=[2.15, 0.95], hspace=0.08,
@@ -155,7 +216,6 @@ def draw(span, ivals, rows, title, out, width):
     for i in range(n):
         top.axhspan(i - 0.5, i + 0.5, color="#f7f8f9" if i % 2 == 0 else "white", linewidth=0)
 
-    # draw in issue order so later-starting overlaps sit on top
     op_to_y = {}
     for i, (label, names, color) in enumerate(rows):
         y = n - 1 - i
@@ -169,7 +229,6 @@ def draw(span, ivals, rows, title, out, width):
         if op not in op_to_y:
             continue
         y, color = op_to_y[op]
-        # inclusive end: bar covers cycles lo..hi
         top.barh(y, hi - lo + 1, left=lo, height=0.62, color=color,
                  edgecolor="none", linewidth=0, align="center", zorder=2 + z)
 
@@ -182,8 +241,12 @@ def draw(span, ivals, rows, title, out, width):
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, span)
-    bot.set_ylim(0, max(4, (max(ys) if ys else 0) + 0.4))
-    bot.set_ylabel("IPC")
+    peak = max(ys) if ys else 0.0
+    # Dynamic IPC ceiling: multiples of 0.5; peak≤1 → 1 (never finer than 0.5).
+    ylim = 1.0 if peak <= 1.0 else math.ceil(peak * 2) / 2.0
+    bot.set_ylim(0, ylim)
+    bot.set_yticks([i * 0.5 for i in range(int(round(ylim * 2)) + 1)])
+    bot.set_ylabel(ylabel)
     bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)
@@ -207,16 +270,26 @@ def main(argv):
     p.add_argument("--bin", type=int, default=20, help="IPC bin width in ticks (default 20)")
     p.add_argument("--label", default="", help="Figure number and name for the chart title")
     p.add_argument("--vf", type=int, default=0, help="0-based VF launch index (default 0)")
+    p.add_argument("--warp", type=int, default=0,
+                   help="SIMT: which warp to plot for Instr IPC (default 0)")
     args = p.parse_args(argv[1:])
     if args.bin < 1:
         p.error("--bin must be a positive number of ticks")
-    vf_ticks, span, ivals = window(args.instr, args.kind, args.vf)
+    vf_ticks, span, ivals, n_warps, warp = window(
+        args.instr, args.kind, args.vf, args.warp
+    )
     rows = rows_from(ivals)
     for label, names, _ in rows:
         print(f"{label} {sum(1 for _, _, op in ivals if op in names)}")
-    title = (f"{args.label}  ·  span {span} (VF {vf_ticks})" if args.label
-             else f"{args.kind.upper()} instructions  ·  span {span} (VF {vf_ticks})")
-    draw(span, ivals, rows, title, args.out, args.bin)
+    if args.kind == "simt" and warp is not None and n_warps > 0:
+        scope = f"Instr IPC w{warp}/{n_warps}"
+        ylabel = f"Instr IPC (w{warp})"
+    else:
+        scope = "Instr IPC (all)"
+        ylabel = "Instr IPC"
+    title = (f"{args.label}  ·  {scope}  ·  span {span} (VF {vf_ticks})" if args.label
+             else f"{args.kind.upper()} instructions  ·  {scope}  ·  span {span} (VF {vf_ticks})")
+    draw(span, ivals, rows, title, args.out, args.bin, ylabel=ylabel)
     return 0
 
 

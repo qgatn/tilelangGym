@@ -4,6 +4,7 @@ Bars: is_popped=1 → start, is_popped=0 → end (width end-start+1); later over
 on top, no borders. Only RVEC* pipes (via plot_charts.windows).
 """
 
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -89,8 +90,11 @@ def draw(path, title, out_name, xlim=None):
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, view)
-    bot.set_ylim(0, max(4, (max(ys) if ys else 1) + 0.4))
-    bot.set_ylabel("IPC")
+    peak = max(ys) if ys else 0.0
+    ylim = 1.0 if peak <= 1.0 else math.ceil(peak * 2) / 2.0
+    bot.set_ylim(0, ylim)
+    bot.set_yticks([i * 0.5 for i in range(int(round(ylim * 2)) + 1)])
+    bot.set_ylabel("Instr IPC (w0)")
     bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)

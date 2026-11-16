@@ -1,8 +1,11 @@
 """SV3 charts for the contiguous-K runs."""
 
+import math
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
+from functools import reduce
+from math import gcd
 from pathlib import Path
 
 import matplotlib
@@ -19,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = ROOT / "plots"
 MN = re.compile(r"\(ID:\s*(\d+)\)\s+([A-Z0-9_]+)")
+PC = re.compile(r"PC: (0x[0-9a-f]+)")
 PIPE = re.compile(r"\)\s+([A-Z0-9]+)\s+:")
 PALETTE = [
     "#1f4e79", "#c45c26", "#1a7a7a", "#e07a1f", "#1b5e20", "#5c4e78",
@@ -57,14 +61,31 @@ def opcode_id(dec):
     return (int(match.group(1)), match.group(2)) if match else (None, None)
 
 
-def windows(path: Path, vf_name: str):
+def decode_pc(dec):
+    m = PC.search(dec or "")
+    return m.group(1) if m else None
+
+
+def _infer_n_warps(per_pc_lens):
+    counts = Counter(c for c in per_pc_lens if c != 1)
+    if not counts:
+        return 1
+    common = [c for c, _ in counts.most_common()]
+    n = reduce(gcd, common)
+    if n <= 1:
+        n = max(counts.items(), key=lambda kv: kv[1])[0]
+    return n
+
+
+def windows(path: Path, vf_name: str, warp: int | None = 0):
     """Return (span, ivals) where ivals are (issue_rel, done_rel, op) sorted by issue.
 
     Body rows/IPC use RVEC* pipes only (SIMT and SIMD vector path).
+    For VF_SIMT, Instr IPC keeps one warp only (default w0); pass warp=None for all.
     """
     rows = [row for row in decode_instr_logs_from_file(path) if row.core == 0 and row.sub == 1]
     vf_issues, vf_dones = {}, {}
-    all_issues, all_dones, rvec = {}, {}, set()
+    all_issues, all_dones, rvec, pc_of = {}, {}, set(), {}
     for row in rows:
         ident, op = opcode_id(row.dec)
         if op is None:
@@ -74,6 +95,9 @@ def windows(path: Path, vf_name: str):
             all_issues[key] = row.time
             if is_rvec(row.dec):
                 rvec.add(key)
+                pc = decode_pc(row.dec)
+                if pc:
+                    pc_of[key] = pc
         elif row.is_popped == 0:
             all_dones[key] = row.time
         if op != vf_name:
@@ -90,7 +114,7 @@ def windows(path: Path, vf_name: str):
         return 0, []
     # First VF only for ANALYSIS charts (first launch)
     start0, done0 = spans[0]
-    ivals = []
+    raw = []
     for key, start in all_issues.items():
         op = key[2]
         if op == vf_name or key not in all_dones or key not in rvec:
@@ -102,7 +126,35 @@ def windows(path: Path, vf_name: str):
         hi = min(end, done0) - start0
         if hi < lo:
             continue
-        ivals.append((lo, hi, op))
+        raw.append((lo, hi, op, pc_of.get(key), start))
+
+    use_single = vf_name == "VF_SIMT" and warp is not None
+    if use_single:
+        per_pc = defaultdict(list)
+        for lo, hi, op, pc, abs_start in raw:
+            if pc is None:
+                continue
+            per_pc[pc].append((lo, hi, op, abs_start))
+        n_warps = _infer_n_warps([len(v) for v in per_pc.values()])
+        bad = {pc: len(v) for pc, v in per_pc.items()
+               if len(v) != 1 and (len(v) % n_warps) != 0}
+        if bad or n_warps <= 1:
+            print(f"note: warp filter unsafe ({len(bad)} bad PCs, n_warps={n_warps}); "
+                  f"Instr IPC keeps all warps")
+            ivals = [(lo, hi, op) for lo, hi, op, _, _ in raw]
+        else:
+            ivals = []
+            for pc, seq in per_pc.items():
+                seq = sorted(seq, key=lambda x: (x[0], x[3]))
+                if len(seq) == 1:
+                    continue
+                for k, (lo, hi, op, _) in enumerate(seq):
+                    if (k % n_warps) == warp:
+                        ivals.append((lo, hi, op))
+            print(f"note: Instr IPC filtered to w{warp}/{n_warps}")
+    else:
+        ivals = [(lo, hi, op) for lo, hi, op, _, _ in raw]
+
     ivals.sort(key=lambda x: x[0])
     last = max((hi for _, hi, _ in ivals), default=0)
     return last + 1, ivals
@@ -158,8 +210,11 @@ def draw_instr(case: Path, title: str, out_name: str, kind: str):
     bot.fill_between(xs, ys, color="#5c4e78", alpha=0.14, linewidth=0)
     bot.plot(xs, ys, color="#5c4e78", linewidth=1.15)
     bot.set_xlim(0, ticks)
-    bot.set_ylim(0, max(4, (max(ys) if ys else 1) + 0.4))
-    bot.set_ylabel("IPC")
+    peak = max(ys) if ys else 0.0
+    ylim = 1.0 if peak <= 1.0 else math.ceil(peak * 2) / 2.0
+    bot.set_ylim(0, ylim)
+    bot.set_yticks([i * 0.5 for i in range(int(round(ylim * 2)) + 1)])
+    bot.set_ylabel("Instr IPC (w0)" if kind == "simt" else "Instr IPC")
     bot.set_xlabel("tick (issue → completion)")
     bot.yaxis.grid(True, color="#eef0f2", linewidth=0.7)
     bot.set_axisbelow(True)
