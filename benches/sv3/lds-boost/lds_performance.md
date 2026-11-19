@@ -2,18 +2,20 @@
 
 `x[k]` is one K-vector. `A[k, n]` stores `n` contiguously. Thread `n` computes `Out[n] = Σ_k A[k, n] · x[k]`.
 
-Numbers are N=2048, K=8, 256 threads, rerun on the current TileLang (`562cbc7c`, 2026-11-18). All schedules pass (max abs 1.2e-07). Provenance: `results_rebuild.txt`; traces under `runs/<tag>/npusim/`. Charts are in `plots/`.
+Numbers are N=2048, K=8, 256 threads, rerun on the current TileLang (`562cbc7c`, 2026-11-18). All schedules pass (max abs 1.2e-07). Provenance: `logs/results_rebuild.txt`; traces under `runs/<tag>/npusim/`. Charts are in `plots/`.
 
 ## Contents
 
 1. [Layout](#1-layout) — the address pattern and its CCE ceiling.
 2. [CCE line](#2-cce-line-at-256-threads) — what a bare CCE load loop scores.
-3. [V1 / V2 / V3](#3-v1--v2--v3) — the three schedules and their numbers.
+3. [V1 / V2 / V3](#3-v1-v2-v3) — the three schedules and their numbers.
 4. [Why V1 is slower](#4-why-the-higher-band-is-slower) — band vs el/cyc, and where the ticks go.
 5. [Instruction charts](#5-instruction-charts) — LDS-focused IPC for V1 and V3.
 6. [How to get closer](#6-how-to-get-closer) — the levers, in order of payoff.
-6. [Spills](#7-spills) — V3's schedule, the register math, and why the spill clogs the band.
-7. [Conclusion](#8-conclusion)
+7. [Spills](#7-spills) — V3's schedule, and why the spill clogs the band.
+8. [CCE V3](#8-cce-v3) — the same schedule written by hand, and the compiler knobs.
+9. [Theoretical registers](#9-theoretical-registers) — live bytes against TileLang V3 and CCE V3.
+10. [Conclusion](#10-conclusion)
 
 ## 1. Layout
 
@@ -23,6 +25,8 @@ Numbers are N=2048, K=8, 256 threads, rerun on the current TileLang (`562cbc7c`,
 - One warp issue is 32 × 4 B = **128 B**, banks 0–31 once.
 - K=8 is four such issues per output.
 
+**Figure 1.** One warp issue. Lane `t` and lane `t+1` are one word, 4 B, apart.
+
 ```text
 word:   j    j+1   j+2  ... j+31
 lane:   L0   L1    L2   ... L31
@@ -31,7 +35,7 @@ bank:    0    1     2   ...  31
 
 CCE of this address, loads only, no FFMA (`79.92 B/cyc`):
 
-```36:43:benches/sv3/lds-boost/a_row8_pack.asc
+```36:43:benches/sv3/lds-boost/cce/a_row8_pack.asc
 #elif PACK == 2
   // Transposed UB: u32 index = tid + i*T (pure-bench shape, same kU32 loads).
   constexpr int kLoads = kU32 / kThreads;
@@ -45,6 +49,8 @@ CCE of this address, loads only, no FFMA (`79.92 B/cyc`):
 The old `A[n, k]` layout put 16 B between lanes and scored **29.36 B/cyc**. That is not this layout.
 
 ## 2. CCE line at 256 threads
+
+**Table 1.** CCE ceilings at 256 threads.
 
 | Case | Stride | B/issue | B/cyc |
 |---|---:|---:|---:|
@@ -60,6 +66,8 @@ The old `A[n, k]` layout put 16 B between lanes and scored **29.36 B/cyc**. That
 
 Same math, same `A[k, n]` addresses. The difference is when FFMA runs. V2 also widens the lane load.
 
+**Table 2.** The three TileLang schedules. N=2048, K=8, 256 threads.
+
 | | Order | VF | el/cyc | Load band | LDK/STK |
 |---|---|---:|---:|---:|---:|
 | **V1** | Load 4 rows, then FFMA | 8373 | 0.24 | **63.75** | 512/512 |
@@ -68,7 +76,7 @@ Same math, same `A[k, n]` addresses. The difference is when FFMA runs. V2 also w
 
 V1 source: all loads, then all FFMAs.
 
-```124:142:benches/sv3/lds-boost/kernels_flip.py
+```124:142:benches/sv3/lds-boost/src/kernels_flip.py
                     for q in T.serial(4):
                         for n, c in T.Parallel(threads, kh):
                             wa[q, n, c] = a_t_ub[c, q * threads + n]
@@ -92,7 +100,7 @@ V1 source: all loads, then all FFMAs.
 
 V3 source: one row is finished before the next load.
 
-```190:200:benches/sv3/lds-boost/kernels_flip.py
+```190:200:benches/sv3/lds-boost/src/kernels_flip.py
                         for n, c in T.Parallel(threads, kh):
                             wa[n, c] = a_t_ub[c, q * threads + n]
                         for n, c in T.Parallel(threads, kh):
@@ -126,6 +134,8 @@ V1's band is high because the 192 loads overlap. The FFMA is still there, after 
 
 Busy unions on the steady VF make the split exact:
 
+**Table 3.** Busy unions on the steady VF, in ticks.
+
 | VF | span | LDS busy | F2F busy | FFMA busy | STK+LDK busy |
 |---|---:|---:|---:|---:|---:|
 | V1 steady | 1459 | **257** | 750 | 635 | 1044 + 1063 |
@@ -141,21 +151,26 @@ Turning off `asc_syncthreads` on V3 did not help (VF 4812, 0.43 el/cyc, band 25.
 
 Charts use the `charts/web` method: issue ticks binned by 20, issues per tick. **Instr IPC** is warp 0; the focus panel is `LDS`. **Warp IPC** is all 8 warps. Steady VF (VF[1]) of each arm.
 
-**V1** — `plots/v1_instr_lds.png`, `plots/v1_warps.png`:
+**Figure 2.** V1, instruction IPC, warp 0, LDS focus. `plots/v1_instr_lds.png`.
 
 ![V1 Instr IPC, LDS focus](plots/v1_instr_lds.png)
 
+**Figure 3.** V1, warp IPC, all 8 warps. `plots/v1_warps.png`.
+
 ![V1 Warp IPC](plots/v1_warps.png)
 
-One LDS burst at the head; the rest of the row is unpack/FFMA/STS with the STK/LDK stack on top.
+- One LDS burst at the head. The rest of the span is unpack, FFMA, and STS.
 
-**V3** — `plots/v3_instr_lds.png`, `plots/v3_warps.png`:
+**Figure 4.** V3, instruction IPC, warp 0, LDS focus. `plots/v3_instr_lds.png`.
 
 ![V3 Instr IPC, LDS focus](plots/v3_instr_lds.png)
 
+**Figure 5.** V3, warp IPC, all 8 warps. `plots/v3_warps.png`.
+
 ![V3 Warp IPC](plots/v3_warps.png)
 
-Four LDS groups, one per row, each followed by its FFMA block.
+- Four LDS groups, one per row, each followed by its FFMA block.
+- STK and LDK are drawn. They are rows of their own, and bands in the stack, in crimson and purple. A figure that should hide them passes `--skip STK,LDK` to `export_json.py`.
 
 ## 6. How to get closer
 
@@ -172,20 +187,40 @@ What will not move the needle: `--nosync` (measured, VF got worse), 512 threads 
 
 - Every schedule does 512 stack stores and 512 reloads per VF.
 - In V3 the eight stores per row are the eight `x` floats (`xfa[4]`, `xfb[4]`), spilled while `A` is unpacked, then reloaded for FFMA. In V1 the 16-word frame (`wa[16]`, `plo[16]`, `phi[16]`) is the cold-VF cost.
-- They are not pressure: the values fit with room to spare. The pun forces memory.
+- The live set that would have to fit is ~88 B per thread, 22 KB across 256 threads (§9). The spill is not that budget.
 
-| Live set | Registers | Share of 128 KB |
+- **Nothing we tried removes them:**
+
+- Removing `__launch_bounds__(256)` — still 512/512.
+- `--nosync` — still 512/512.
+- 128 threads — still 512/512 (PASS, VF 6414, 0.32 el/cyc: half the warps, twice the rows per thread).
+- Every `x` spelled as its own scalar `T.alloc_var`, no array anywhere — still 512/512 (`probe-xv_scalars`, VF 5266).
+- TileLang has no register-pinning knob: `alloc_var`/`alloc_fragment` are storage scopes, and `T.set_max_nreg` is CUDA-only.
+
+- **A schedule change separates the two effects:**
+
+- **Reorder / split** — unpack into float UB first, then load `x` and MAC (split puts the MAC in its own VF). Both pass, and the MAC itself has **zero** STK/LDK. The 512 that remain are the pun itself: each `*(half*)(&v_)` is one stack store of the `uint16` and one stack reload as `half`, and that round-trip sits inside the unpack, before `x` is live.
+- Both schedules are slower end to end (VF 10358 and 10509, 0.20 and 0.19 el/cyc) because the unpack is now its own stack-bound pass.
+
+- **The bisheng knobs do not change the count.** All of these stay 512/512:
+
+**Table 4.** TileLang V3 rebuilt with bisheng register and stack flags. All 512/512.
+
+| Flag | VF | el/cyc |
 |---|---:|---:|
-| `x` only | 8 | 6% |
-| `x` + 4 A words + halves + 2 accs | 18 | 14% |
+| `--cce-simt-maxrregcount=128` (top of the legal range; 255 is rejected, range is `(0, 128]`) | 4274 | 0.48 |
+| `--cce-simt-maxrregcount=32` | 4337 | 0.47 |
+| frame elimination + frame-stack opt (`-mllvm`) | 4340 | 0.47 |
+| rematerialization (`-mllvm`, three passes) | 4315 | 0.47 |
+| SIMT pattern + memop combine (`-mllvm`) | 4246 | 0.48 |
+| `--cce-disable-vf-stack-reserved-ubuf` | 4314 | 0.47 |
 
-Removing `__launch_bounds__(256)` left the spills at 512/512. `--nosync` left them too. Running 128 threads left them too (PASS, VF 6414, 0.32 el/cyc — 512 again: half the warps, twice the rows per thread). Even spelling every x as its own scalar `T.alloc_var` with no array anywhere left them at 512/512 (`probe-xv_scalars`, VF 5266). TileLang has no register-pinning knob — `alloc_var`/`alloc_fragment` are storage scopes, and `T.set_max_nreg` is CUDA-only.
-
-A schedule change does separate the two effects. Unpacking into float UB first and only then loading x (`reorder`, and `split` with the MAC in its own VF) leaves the MAC with **zero** STK/LDK. The 512 that remain are the pun itself: each `*(half*)(&v_)` is one stack store of the `uint16` and one stack reload as `half`, and that round-trip is inside the unpack, before x is live. Both schedules are slower end to end (VF 10358 and 10509, 0.20 and 0.19 el/cyc) because the unpack is now its own stack-bound pass. Rebuilding V3 with the bisheng knobs that talk about registers or the stack — `--cce-simt-maxrregcount` at 32 and at 128 (255 is rejected; the legal range is `(0, 128]`), frame elimination, rematerialization, the SIMT pattern opts, and `--cce-disable-vf-stack-reserved-ubuf` — leaves the count at 512/512. Capping the file at 32 registers does not add spills, so this is not a register-budget choice. The probe log is `SPILL_PROBES.md`.
+- Capping the file at 32 registers does not add spills, so this is not a register-budget choice.
+- The probe log is `SPILL_PROBES.md`. Numbers are in `logs/results_probe.txt` and `logs/results_sched.txt`.
 
 ### 7.1 V3's schedule, instruction by instruction
 
-Steady VF (VF[1], span 1607 ticks) of `v3_row-n2048-k8-t256`. First-issue order per PC, relative to VF start:
+- Steady VF (VF[1], span 1607 ticks) of `v3_row-n2048-k8-t256`. First-issue order per PC, relative to VF start:
 
 ```text
 +  17   S2R / SHFI / IADD_I / MOVI   (×8 each)   address setup for x and A
@@ -203,28 +238,15 @@ Steady VF (VF[1], span 1607 ticks) of `v3_row-n2048-k8-t256`. First-issue order 
 +1546   END
 ```
 
-The stack ops are not scattered. The trace shows four stack-busy segments — `(236,503)`, `(576,863)`, `(895,1200)`, `(1235,1549)` — one per row, and each starts right after that row's four A loads land and ends as its FFMA block begins. Eight stores then eight loads, per row, 4 rows, 8 warps: `8 × 4 × 8 = 256` STK and 256 LDK per VF, the 512/512.
+- The stack ops are not scattered. Four stack-busy segments, one per row: `(236,503)`, `(576,863)`, `(895,1200)`, `(1235,1549)`.
+- Each segment starts right after that row's four A loads land and ends as its FFMA block begins.
+- Eight stores then eight loads, per row, 4 rows, 8 warps: `8 × 4 × 8 = 256` STK and 256 LDK per VF, the 512/512.
 
-### 7.2 Register math: the spills are not needed
+### 7.2 The spill is what clogs the load band
 
-Per-thread live values at the spill point (row q of V3, after the A loads land):
+- The per-bin mix falsifies "loads are the wall."
 
-| Value | Count | Registers | Notes |
-|---|---:|---:|---|
-| `xfa[4]` + `xfb[4]` | 8 | 8 | the x vector, fp32 |
-| `wa[4]` | 4 | 4 | packed A words for this row |
-| `plo[4]` + `phi[4]` | 8 halves | 4 | unpacked A halves, packable 2/reg |
-| `accA` + `accB` | 2 | 2 | accumulators |
-| loop/misc | — | ~4 | q, base pointers |
-| **Total live** | | **~22** | |
-
-At 256 threads the register file is 128 KB = 224 KB FP + 32 KB GP mapped as **128 registers per thread**. 22 live registers is **17%** of the file. Even the pessimistic count (halves unpacked 1/reg, no packing) is 26 registers = 20%.
-
-The same arithmetic on the *stack* side: 256 STK + 256 LDK per VF. Each STK stays active 27–48 ticks (median 36). The four stack segments total **1173 busy ticks** — 73% of the 1607-tick VF, and longer than the LDS busy union (577) and the FFMA busy union (492) *combined*.
-
-### 7.3 The spill is what clogs the load band
-
-The claim "loads are the wall" is falsified by the per-bin op mix. In bins of 60 ticks across the steady VF:
+**Table 5.** V3 steady VF, issues per 60-tick bin.
 
 ```text
 tick-bin   LDS    F2F    STK    LDK   FFMA
@@ -242,15 +264,93 @@ tick-bin   LDS    F2F    STK    LDK   FFMA
   ...        the pattern repeats at +860, +1200
 ```
 
-Between the row loads the pipe runs stack traffic alone: bins `240–359`, `600–719`, `960–1079`, `1320–1439` are STK/LDK with **zero** LDS. That is ~480 ticks of pure stack in the middle of where the loads could have been running.
+- Between the row loads the pipe runs stack traffic alone: bins `240–359`, `600–719`, `960–1079`, `1320–1439` are STK/LDK with **zero** LDS. That is ~480 ticks of pure stack.
+- One slab of A is 16384 B. Spread over the LDS busy union of 577 ticks, that is **28.15 B/cyc**.
+- The LDS issues themselves are clean: 192 issues, each active 27–46 ticks, one bank per lane.
+- What stretches the union to 577 is each row's loads waiting behind the previous row's 265-tick stack block.
+- Remove the stack round-trip and the four row-load batches can sit back-to-back, the same way V1's 192 loads finish in 257 ticks (**63.75 B/cyc**) with identical addresses.
+- The band loss is the spill's scheduling shadow, not the memory system.
+- Loads-only proof, no unpack and no stack: `cce/a_row8_pack.asc`, same addresses — **79.92 B/cyc**.
 
-The band arithmetic: one slab of A is 16384 B. Spread over the LDS busy union of 577 ticks, that is **28.15 B/cyc**. But the LDS issues themselves are clean — 192 issues, each active 27–46 ticks — and the address pattern is one bank per lane. What stretches the union to 577 is that each row's loads *wait* behind the previous row's 265-tick stack block. Remove the stack round-trip and the four row-load batches can sit back-to-back, the same way V1's 192 loads finish in 257 ticks (**63.75 B/cyc**) with identical addresses. The band loss is the spill's scheduling shadow, not the memory system.
+## 8. CCE V3
 
-CCE proof: `a_row8_pack.asc`, same addresses, no unpack, no stack — **79.92 B/cyc**.
+Hand-written CCE of the V3 order, `cce/v3_row.asc`. Load `x`, then one row-block at a time: four packed loads, unpack, MAC, store. The unpack is a `union { uint32_t u; half h[2]; }`, not TileLang's `*(half*)(&v_)`. Trace: `runs/v3_cce-n2048-k8-t256/`. Flag rebuilds: `logs/results_cce_flags.txt`.
 
-## 8. Conclusion
+- It passes, max abs 1.19e-07.
+- It still spills: **512 STK and 512 LDK**, same count as TileLang V3.
+- End to end it is slower than TileLang V3: VF 5439, 0.38 el/cyc, against V3's 4424 and 0.46.
+- Steady VF span is 1623, close to TileLang V3's 1607.
+- The eight `x` loads and their F2F finish first. STK starts at +186, immediately after the first A-word load, then alternates with F2F and FFMA.
+- So the spill is not the TileLang pun spelling. bisheng sends this union bitcast through the stack the same way.
+
+The register and stack knobs, rebuilt on this CCE file, do not remove it. Every one passes and stays 512/512:
+
+**Table 6.** CCE V3 rebuilt with the same flags. All 512/512.
+
+| Flag | VF | el/cyc | STK/LDK |
+|---|---:|---:|---:|
+| baseline, `-O2`, no extra flag | 5439 | 0.38 | 512/512 |
+| `--cce-simt-maxrregcount=128` | 5440 | 0.38 | 512/512 |
+| `--cce-simt-maxrregcount=32` | 5441 | 0.38 | 512/512 |
+| frame elimination + frame-stack opt | 5424 | 0.38 | 512/512 |
+| rematerialization (three `-mllvm` passes) | 5447 | 0.38 | 512/512 |
+| SIMT pattern + memop combine | 5315 | 0.39 | 512/512 |
+| `--cce-disable-vf-stack-reserved-ubuf` | 5461 | 0.38 | 512/512 |
+
+- `--cce-simt-maxrregcount=255` is rejected. The legal range is `(0, 128]`.
+- Capping the file at 32 registers does not add spills, same as on the TileLang kernel.
+- Pattern opts are the only one that moves the VF (5439 → 5315) and the count does not move.
+- The loads-only CCE, `cce/a_row8_pack.asc`, has no unpack and no stack and scores **79.92 B/cyc**. The spill appears when the packed word is turned into two halves.
+
+## 9. Theoretical registers
+
+Live values at one V3 row, after that row's four A loads have landed. One register is 4 B. At 256 threads the file is 256 × 128 × 4 B = **128 KB**, which is 512 B per thread.
+
+**Table 7.** One thread.
+
+| Value | Count | Bytes | Registers | What it is |
+|---|---:|---:|---:|---|
+| `xfa[4]` + `xfb[4]` | 8 fp32 | 32 B | 8 | `x[k]` for K=8, promoted fp16→fp32. `xfa` is the even k (0, 2, 4, 6), `xfb` the odd k (1, 3, 5, 7). These are the FFMA multipliers. |
+| `wa[4]` | 4 u32 | 16 B | 4 | The four packed A words just loaded for this row. Each word holds one even/odd pair of `A[k, n]`. |
+| `plo[4]` + `phi[4]` | 8 fp16 | 16 B | 4 | Those words split into halves. `plo` is `A[2c, n]`, `phi` is `A[2c+1, n]`. These are the FFMA multiplicands. |
+| `accA` + `accB` | 2 fp32 | 8 B | 2 | The running sum. `accA` adds the even-k products, `accB` the odd-k products. `Out[n]` is their sum. |
+| loop / pointers | — | ~16 B | ~4 | The row index `q` and the base addresses of the next load. |
+| **One thread** | | **~88 B** | **~22** | Everything live at the spill point. |
+
+**Table 8.** All 256 threads. Each row is Table 7 multiplied by 256.
+
+| Value | Bytes | Share of 128 KB |
+|---|---:|---:|
+| `x` (8 fp32) | 8 KB | 6.3% |
+| 4 packed A words | 4 KB | 3.1% |
+| 8 fp16 halves | 4 KB | 3.1% |
+| 2 accumulators | 2 KB | 1.6% |
+| loop / pointers | ~4 KB | 3.1% |
+| **All 256 threads** | **22 KB** | **17%** |
+
+- If each half takes its own register, one thread holds 104 B and all 256 threads hold **26 KB**, 20% of the file.
+- Nothing in that set needs the stack. 22 KB is the whole live footprint of the block.
+
+**Table 9.** That live set against the two measured V3 kernels. The byte rows are the whole block (Table 8). The STK / LDK row is issues per VF, not bytes.
+
+| | Theoretical | TileLang V3 | CCE V3 |
+|---|---:|---:|---:|
+| Live bytes, one thread (Table 7) | ~88 B | ~88 B | ~88 B |
+| Live bytes, 256 threads (Table 8) | 22 KB | 22 KB | 22 KB |
+| Fits in the 128 KB register file | yes, 22 KB of 128 KB (17%) | yes, same 22 KB | yes, same 22 KB |
+| STK / LDK, issues per VF | 0 | 512 / 512 | 512 / 512 |
+| VF, ticks | — | 4424 | 5439 |
+| el/cyc | — | 0.46 | 0.38 |
+| Where the stack sits | — | four segments, 1173 busy ticks, 73% of the 1607-tick VF | STK from +186, alternating with F2F and FFMA, span 1623 |
+
+- Both kernels spill the full 512/512 while the block is only holding 22 KB of the 128 KB file.
+- TileLang V3 pays 1173 stack-busy ticks inside a 1607-tick VF, and the load band falls to 28.15 B/cyc.
+- CCE V3, written with a union bitcast instead of the pun, spills the same count and is slower end to end (0.38 el/cyc against 0.46).
+- The loads-only CCE on the same addresses, with no unpack, does not spill and scores 79.92 B/cyc.
+
+## 10. Conclusion
 
 - The layout is right: 128 B/issue, one bank per lane, 79.92 B/cyc reachable in CCE.
 - V1 shows that load pattern at **63.75 B/cyc** — the banks are not the problem. But V1 is the slowest kernel (**0.24 el/cyc**): its band is a 257-tick burst followed by a ~1200-tick serial tail.
 - V3 is the better kernel (**0.46 el/cyc**) because compute follows each load instead of trailing all of them.
-- V3's 28.15 B/cyc band is not the memory system. Between row loads the pipe runs stack-only bins (~480 ticks per VF): 22 live registers spill to the stack 512 times because of the `*(half*)(&v_)` pun. Fix the lowering (§6.1) and the same addresses have V1's 63.75 B/cyc behind them.
+- V3's 28.15 B/cyc band is not the memory system. Between row loads the pipe runs stack-only bins (~480 ticks per VF): 22 live registers spill to the stack 512 times because of the `*(half*)(&v_)` pun. Fix the lowering (section 6, item 1) and the same addresses have V1's 63.75 B/cyc behind them.

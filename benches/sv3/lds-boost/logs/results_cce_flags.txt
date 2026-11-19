@@ -1,0 +1,19 @@
+== maxrreg128
+PASS maxabs=1.192e-07
+launches=2 VF=5440 el/cyc=0.38 mac/cyc=3.01 IPC=0.71 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== maxrreg32
+PASS maxabs=1.192e-07
+launches=2 VF=5441 el/cyc=0.38 mac/cyc=3.01 IPC=0.71 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== frame
+PASS maxabs=1.192e-07
+launches=2 VF=5424 el/cyc=0.38 mac/cyc=3.02 IPC=0.71 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== remat
+PASS maxabs=1.192e-07
+launches=2 VF=5447 el/cyc=0.38 mac/cyc=3.01 IPC=0.70 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== pattern
+PASS maxabs=1.192e-07
+launches=2 VF=5315 el/cyc=0.39 mac/cyc=3.08 IPC=0.72 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== nostack
+PASS maxabs=1.192e-07
+launches=2 VF=5461 el/cyc=0.38 mac/cyc=3.00 IPC=0.70 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+DONE

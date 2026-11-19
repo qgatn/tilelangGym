@@ -38,8 +38,10 @@ PALETTE = [
     "#1f4e79", "#e07a1f", "#1a7a7a", "#1b5e20", "#7cb342", "#5c4e78",
     "#c45c26", "#3d5a80", "#6b4c7a", "#b5b5b5",
 ]
+# Address math and control flow stay gray. STK and LDK get a real color
+# unless a figure passes them in --skip.
 COLOR_SKIP = {"IADD_I", "IADD", "LEA", "IMAD", "S2R", "SHFI", "MOV", "MOVI",
-              "BRANCH", "ISETP_I", "STK", "LDK", "END", "END_LABEL", "CALL"}
+              "BRANCH", "ISETP_I", "END", "END_LABEL", "CALL"}
 
 
 def fields(dec):
@@ -82,7 +84,14 @@ def main(argv):
     ap.add_argument("--bin", type=int, default=20)
     ap.add_argument("--label", default="", help="Figure number and name for the chart title")
     ap.add_argument("--vf", type=int, default=0, help="0-based VF launch index (default 0)")
+    ap.add_argument("--skip", default="",
+                    help="extra opcodes to draw gray, comma-separated (e.g. STK,LDK)")
     args = ap.parse_args(argv[1:])
+    extra_skip = {s.strip().upper() for s in args.skip.split(",") if s.strip()}
+
+    def skipped(op):
+        short = op.removeprefix("SIMT_").removeprefix("RV_")
+        return op in COLOR_SKIP or op in extra_skip or short in extra_skip
 
     rows = [r for r in decode_instr_logs_from_file(Path(args.instr)) if r.core == 0 and r.sub == 1]
     spans = vf_spans(rows)
@@ -168,7 +177,7 @@ def main(argv):
     opcolors = {}
     ci = 0
     for op in sorted(counts, key=lambda n: -counts[n]):
-        if op in COLOR_SKIP:
+        if skipped(op):
             opcolors[op] = "#b5b5b5"
         else:
             opcolors[op] = PALETTE[ci % len(PALETTE)]

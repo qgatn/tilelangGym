@@ -16,7 +16,7 @@ torch.utils.rename_privateuse1_backend("npu")
 
 import tilelang
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from kernels_flip import BUILDERS, GM_DTYPE  # noqa: E402
 
 SRC = "/home/onasismelchiorjeyakumar/workspace/tilelang/src"

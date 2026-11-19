@@ -30,11 +30,11 @@ float2 _; uint1 v_ = *(uint1*)ptr; ((float2*)&_)[0] = __half22float2(((half2*)&v
 
 (the exact shape `codegen_ascend.cc` already prints for a vectorized `float16x2 → float32x2` cast, `PrintVectorizedCast("__half22float2", ...)` at the `from_ty.is_float16() && target_ty.is_float()` branch) instead of the pointer pun. The `xh_vec` arm shows that lowering exists and reaches the device C; what fails is the *store* side of the vector MAC (`PrintVecElemStore` on a `float2` temp writes `.x`/`.y` separately, which bisheng rejects for `float2` locals — same issue `test_local_var_vector_initializer_is_emitted_before_declaration` guards on the load side).
 
-Provenance: `results_probe.txt`, `probe-xv_scalars-n2048-k8-t256/` (trace + source), `probe_xpersist.py` (arms), `probe_pc.py` (PC schedule).
+Provenance: `logs/results_probe.txt`, `probe-xv_scalars-n2048-k8-t256/` (trace + source), `src/probe_xpersist.py` (arms), `scripts/probe_pc.py` (PC schedule).
 
 ## Scheduling and bisheng flags (same day)
 
-Two TileLang schedules, both PASS at maxabs 1.19e-07, and six rebuilds of the existing V3 device source. `results_sched.txt`.
+Two TileLang schedules, both PASS at maxabs 1.19e-07, and six rebuilds of the existing V3 device source. `logs/results_sched.txt`.
 
 | Arm | What changed | VF | el/cyc | STK/LDK |
 |---|---|---:|---:|---:|

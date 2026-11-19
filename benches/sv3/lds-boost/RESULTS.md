@@ -6,8 +6,8 @@ Reference lines: pure pack 81.11 · pure size-scaled @256t 76.38 · scalar S1 34
 
 ## A — packing works; the lane stride is the killer
 
-`a_row8_pack.asc`: same 16 KB slab, same **128 × LDS.b32 (RVECLD)** issues,
-only the lane→address pattern differs (`results_a.txt`):
+`cce/a_row8_pack.asc`: same 16 KB slab, same **128 × LDS.b32 (RVECLD)** issues,
+only the lane→address pattern differs (`logs/results_a.txt`):
 
 | Layout | Index | Lane stride | LDS busy | B/cyc |
 |---|---|---:|---:|---:|
@@ -29,7 +29,7 @@ That transposed address is what V1–V3 in this folder run. V1's load band is **
 
 ## B — 512 threads: slight LDS gain, net VF loss
 
-Real kernels, same N=2048 K=8 shape, 2 slabs (`results_b.txt`, rates from
+Real kernels, same N=2048 K=8 shape, 2 slabs (`logs/results_b.txt`, rates from
 VF[1]; t256 refs from SV3-theoretical Tables 6d/4):
 
 | Kernel | t | VF[1] span | LDS B/cyc | el/cyc (full case) |
@@ -51,7 +51,7 @@ VF[1]; t256 refs from SV3-theoretical Tables 6d/4):
 
 ## C — IADD is NOT the kernel's problem
 
-`results_c.txt` (addr ops inside the LDS busy window):
+`logs/results_c.txt` (addr ops inside the LDS busy window):
 
 | Trace | IADD_I / LEA in LDS busy | other-pipe ticks in LDS busy |
 |---|---|---:|
@@ -79,4 +79,4 @@ VF[1]; t256 refs from SV3-theoretical Tables 6d/4):
 | C: IADD? | No. None in the kernel's LDS band. |
 | Where is the TileLang `A[k, n]`? | This folder: V1 63.75 B/cyc band, V3 0.47 el/cyc. Write-up: `lds_performance.md`. |
 
-Provenance: `results_a.txt`, `results_b.txt`, `results_c.txt`.
+Provenance: `logs/results_a.txt`, `logs/results_b.txt`, `logs/results_c.txt`.

@@ -20,7 +20,7 @@ import tilelang.ascend.language as T
 import tilelang.transform
 import tvm
 
-HERE = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 SRC = "/home/onasismelchiorjeyakumar/workspace/tilelang/src"
 THREADS = 256
 N = 2048
@@ -141,7 +141,7 @@ extern "C" TL_EXPORT int call(void* a, void* x, void* o, void* stream) {{
 
 
 def compile_arm(arm: str) -> Path:
-    out = HERE / "runs" / f"probe-{arm}-n2048-k8-t256"
+    out = ROOT / "runs" / f"probe-{arm}-n2048-k8-t256"
     out.mkdir(parents=True, exist_ok=True)
     src = lower_source(arm)
     (out / "kernel.cpp").write_text(src)

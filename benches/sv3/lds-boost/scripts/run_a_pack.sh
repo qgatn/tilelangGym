@@ -2,7 +2,7 @@
 # A: packed-load ceilings at GEMV row shape (and 512t variants).
 # Usage: bash run_a_pack.sh
 set -u
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 source /mnt/fluxdata/Ascend/cann_92b2/cann-9.2.0-beta.2/set_env.sh
 SIM_LIB="${ASCEND_HOME_PATH}/tools/simulator/Ascend950PR_9599/lib"
@@ -12,7 +12,7 @@ PY=/home/onasismelchiorjeyakumar/workspace/tilelang/.venv/bin/python
 PYV=/home/onasismelchiorjeyakumar/venv/bin/python
 TOOLS="${ROOT}/../simt-uarch/tools"
 SRC=/home/onasismelchiorjeyakumar/workspace/tilelang/src
-OUT="$ROOT/results_a.txt"
+OUT="$ROOT/logs/results_a.txt"
 mkdir -p build
 : > "$OUT"
 
@@ -57,11 +57,11 @@ run() {  # tag threads packmacro rows
     -I "$SRC" \
     -mllvm -cce-aicore-stack-size=0x8000 -mllvm -cce-aicore-function-stack-size=0x8000 \
     -DSIMT_THREADS="$T" -DPACK="$PACK" -DROWS="$ROWS" -Wl,--no-mmap-output-file \
-    a_row8_pack.asc -o "build/${tag}.so" > "build/${tag}.build.log" 2>&1 \
+    cce/a_row8_pack.asc -o "build/${tag}.so" > "build/${tag}.build.log" 2>&1 \
     || { echo COMPILE_FAIL | tee -a "$OUT"; tail -3 "build/${tag}.build.log"; return 1; }
   rm -rf "build/npusim_${tag}"
   npusim record -s Ascend950 -o "build/npusim_${tag}" -g -n 0 \
-    "$PY launch_row8.py $PWD/build/${tag}.so $T $PACK" \
+    "$PY scripts/launch_row8.py $PWD/build/${tag}.so $T $PACK" \
     > "build/${tag}.log" 2>&1 || true
   grep -ao "PASS.*\|FAIL.*" "build/${tag}.log" | tail -1 | tee -a "$OUT"
   local bin; bin=$(find "build/npusim_${tag}" -name instr.bin | head -1)

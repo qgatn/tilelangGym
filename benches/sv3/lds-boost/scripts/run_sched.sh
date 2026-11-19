@@ -1,7 +1,7 @@
 #!/bin/bash
 # Schedule probes + bisheng flag rebuilds of V3. One npusim at a time.
 set -uo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 source /mnt/fluxdata/Ascend/cann_92b2/cann-9.2.0-beta.2/set_env.sh
 ASC="${ASCEND_HOME_PATH:-/mnt/fluxdata/Ascend/cann_92b2/cann-9.2.0-beta.2}"
@@ -15,7 +15,7 @@ export TILELANG_DISABLE_CACHE=1 TORCH_DEVICE_BACKEND_AUTOLOAD=0 TILELANG_DISABLE
 export PYTHONPATH="/home/onasismelchiorjeyakumar/workspace/tilelang:${PYTHONPATH:-}"
 export CANN_PYTHON="$ASC/python/site-packages"
 SRC=/home/onasismelchiorjeyakumar/workspace/tilelang/src
-OUTF="$ROOT/results_sched.txt"
+OUTF="$ROOT/logs/results_sched.txt"
 : > "$OUTF"
 
 run_sim() {  # tag so-path
@@ -25,7 +25,7 @@ run_sim() {  # tag so-path
   rm -rf "$out/npusim"
   echo "== $tag" | tee -a "$OUTF"
   npusim record -s Ascend950 -o "$out/npusim" -g -n 0 \
-    "$PY $ROOT/launch_flip.py $so 2048 8 packT" > "$out/sim.log" 2>&1 || true
+    "$PY $ROOT/scripts/launch_flip.py $so 2048 8 packT" > "$out/sim.log" 2>&1 || true
   rg -o "PASS.*|FAIL.*" "$out/sim.log" | tail -1 | tee -a "$OUTF"
   local bin
   bin=$(find "$out/npusim" -name instr.bin | head -1)
@@ -36,8 +36,8 @@ run_sim() {  # tag so-path
 }
 
 for arm in reorder split; do
-  "$PY" "$ROOT/probe_sched.py" "$arm" build > "$ROOT/build/probe-${arm}.compile.log" 2>&1 \
-    || { echo "COMPILE_FAIL $arm" | tee -a "$OUTF"; tail -20 "$ROOT/build/probe-${arm}.compile.log" | tee -a "$OUTF"; continue; }
+  "$PY" "$ROOT/src/probe_sched.py" "$arm" build > "$ROOT/logs/probe-${arm}.compile.log" 2>&1 \
+    || { echo "COMPILE_FAIL $arm" | tee -a "$OUTF"; tail -20 "$ROOT/logs/probe-${arm}.compile.log" | tee -a "$OUTF"; continue; }
   rg -n "pun=|__simt_vf__|asc_syncthreads|\*\(half" "$ROOT/runs/probe-${arm}-n2048-k8-t256/kernel.cpp" | head -20 | tee -a "$OUTF"
   run_sim "probe-$arm" "$ROOT/runs/probe-${arm}-n2048-k8-t256/kernel.so"
 done
