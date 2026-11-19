@@ -10,6 +10,7 @@ set the theoretical rates in `simt-uarch/simt-uarch.md` and
 | `analyze.py` | Per-opcode busy-union analysis |
 | `*_sweep.sh` / `*_probe.sh` | Rebuild / remeasure scripts |
 | `results/` | Provenance `.txt` logs cited by the docs |
-| `build/` | Compiled `.so` + npusim artifacts |
+
+Compiled `.so` files and npusim traces are not kept. The charts are in `../simt-uarch/plots/`.
 
 Narratives and charts live next door in `../simt-uarch/`.

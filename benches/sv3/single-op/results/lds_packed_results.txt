@@ -1,5 +1,0 @@
-lds_packed_t128 PASS maxabs=0.000e+00
-op=SIMT_LDS n=128 span=395 busy=395 act_min=27 act_med=27 act_max=38
-lds_packed_t256 PASS maxabs=0.000e+00
-op=SIMT_LDS n=128 span=272 busy=272 act_min=27 act_med=27 act_max=46
-SWEEP_DONE

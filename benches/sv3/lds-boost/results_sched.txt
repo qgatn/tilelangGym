@@ -1,0 +1,52 @@
+3:__simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_0(__ubuf__ uint8_t* buf_dyn_shmem, int32_t s) {
+12:      ((__ubuf__ float*)buf_dyn_shmem)[((((c * 1024) + (q * 256)) + ((int32_t)threadIdx.x)) + 4096)] = ((float)(*(half *)(&(v_))));
+14:      ((__ubuf__ float*)buf_dyn_shmem)[((((c * 1024) + (q * 256)) + ((int32_t)threadIdx.x)) + 8192)] = ((float)(*(half *)(&(v__1))));
+17:  asc_syncthreads();
+23:  asc_syncthreads();
+== probe-reorder
+PASS maxabs=1.192e-07
+launches=2 VF=10358 el/cyc=0.20 mac/cyc=1.58 IPC=0.62 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/probe-reorder-n2048-k8-t256/npusim/npusim_20261118155625_launch_flip.py/record/instr.bin
+3:__simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_0(__ubuf__ uint8_t* buf_dyn_shmem) {
+8:      ((__ubuf__ float*)buf_dyn_shmem)[((((c * 1024) + (q * 256)) + ((int32_t)threadIdx.x)) + 4096)] = ((float)(*(half *)(&(v_))));
+10:      ((__ubuf__ float*)buf_dyn_shmem)[((((c * 1024) + (q * 256)) + ((int32_t)threadIdx.x)) + 8192)] = ((float)(*(half *)(&(v__1))));
+15:__simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_1(__ubuf__ uint8_t* buf_dyn_shmem, int32_t s) {
+25:  asc_syncthreads();
+== probe-split
+PASS maxabs=1.192e-07
+launches=4 VF=10509 el/cyc=0.19 mac/cyc=1.56 IPC=0.61 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/probe-split-n2048-k8-t256/npusim/npusim_20261118155728_launch_flip.py/record/instr.bin
+== compile flag-maxrreg255
+COMPILE_FAIL flag-maxrreg255
+bisheng: error: --cce-simt-maxrregcount must be an integer constant in range (0, 128]
+bisheng: error: --cce-simt-maxrregcount must be an integer constant in range (0, 128]
+== compile flag-maxrreg32
+== flag-maxrreg32
+PASS maxabs=1.192e-07
+launches=2 VF=4337 el/cyc=0.47 mac/cyc=3.78 IPC=0.90 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/flag-maxrreg32-v3/npusim/npusim_20261118155826_launch_flip.py/record/instr.bin
+== compile flag-frame
+== flag-frame
+PASS maxabs=1.192e-07
+launches=2 VF=4340 el/cyc=0.47 mac/cyc=3.78 IPC=0.90 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/flag-frame-v3/npusim/npusim_20261118155907_launch_flip.py/record/instr.bin
+== compile flag-remat
+== flag-remat
+PASS maxabs=1.192e-07
+launches=2 VF=4315 el/cyc=0.47 mac/cyc=3.80 IPC=0.91 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/flag-remat-v3/npusim/npusim_20261118155956_launch_flip.py/record/instr.bin
+== compile flag-pattern
+== flag-pattern
+PASS maxabs=1.192e-07
+launches=2 VF=4246 el/cyc=0.48 mac/cyc=3.86 IPC=0.92 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/flag-pattern-v3/npusim/npusim_20261118160040_launch_flip.py/record/instr.bin
+== compile flag-nostack
+== flag-nostack
+PASS maxabs=1.192e-07
+launches=2 VF=4314 el/cyc=0.47 mac/cyc=3.80 IPC=0.91 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+benches/sv3/lds-boost/runs/flag-nostack-v3/npusim/npusim_20261118160121_launch_flip.py/record/instr.bin
+DONE
+benches/sv3/lds-boost/runs/flag-maxrreg128-v3/npusim/npusim_20261118160313_launch_flip.py/record/instr.bin
+== flag-maxrreg128
+PASS maxabs=1.192e-07
+launches=2 VF=4274 el/cyc=0.48 mac/cyc=3.83 IPC=0.92 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0

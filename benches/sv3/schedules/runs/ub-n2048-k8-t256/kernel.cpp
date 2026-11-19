@@ -11,8 +11,13 @@ __simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_0(__ubuf__ ui
   for (int32_t k = 0; k < 8; ++k) {
     xk = ((float)((__ubuf__ half*)buf_dyn_shmem)[(k + 20480)]);
     #pragma unroll
-    for (int32_t i_1 = 0; i_1 < 8; ++i_1) {
-      acc[i_1] = (acc[i_1] + (((float)((__ubuf__ half*)buf_dyn_shmem)[(((((i_1 >> 1) * 4096) + (((int32_t)threadIdx.x) * 16)) + ((i_1 & 1) * 8)) + k)]) * xk));
+    for (int32_t i_1 = 0; i_1 < 4; ++i_1) {
+      half a_ub_local_cast[2];
+      *(uint1*)(a_ub_local_cast + 0) = *(__ubuf__ uint1*)(((__ubuf__ half*)buf_dyn_shmem) + (((k * 2048) + (i_1 * 512)) + (((int32_t)threadIdx.x) * 2)));
+      float2 _;
+        uint1 v_ = *(uint1*)(a_ub_local_cast + 0);
+        ((float2*)(&_))[0] = __half22float2(((half2*)(&v_))[0]);
+      *(float2*)(acc + (i_1 * 2)) = (*(float2*)(acc + (i_1 * 2)) + (_ * make_float2(xk, xk)));
     }
   }
   #pragma unroll

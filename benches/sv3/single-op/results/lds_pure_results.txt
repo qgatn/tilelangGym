@@ -1,5 +1,0 @@
-lds_pure_fp32_t256 busy=471 issues=256 B/cyc=69.57 iss/cyc=0.544
-lds_pure_bf16_t256 busy=468 issues=256 B/cyc=35.01 iss/cyc=0.547
-lds_pure_bf16x2_t256 busy=204 issues=128 B/cyc=80.31 iss/cyc=0.627
-lds_pure_fp32_t1024 busy=503 issues=256 B/cyc=65.15 iss/cyc=0.509
-lds_pure_bf16x2_t1024 busy=455 issues=128 B/cyc=36.01 iss/cyc=0.281

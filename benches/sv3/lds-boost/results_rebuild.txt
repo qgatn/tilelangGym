@@ -1,0 +1,31 @@
+== v0_base-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=5380 el/cyc=0.38 mac/cyc=3.05 IPC=0.73 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=3645 LDS_issues=192 LDS_busy=1918 LDS_B/cyc=8.54
+VF[1] span=1735 LDS_issues=192 LDS_busy=1212 LDS_B/cyc=13.52
+benches/sv3/lds-boost/runs/v0_base-n2048-k8-t256/npusim/npusim_20261118100820_launch_flip.py/record/instr.bin
+== v1_burst-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=8373 el/cyc=0.24 mac/cyc=1.96 IPC=0.42 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=6914 LDS_issues=192 LDS_busy=301 LDS_B/cyc=54.43
+VF[1] span=1459 LDS_issues=192 LDS_busy=257 LDS_B/cyc=63.75
+benches/sv3/lds-boost/runs/v1_burst-n2048-k8-t256/npusim/npusim_20261118100912_launch_flip.py/record/instr.bin
+== v2_pair-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=4296 el/cyc=0.48 mac/cyc=3.81 IPC=0.91 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=2700 LDS_issues=192 LDS_busy=1217 LDS_B/cyc=13.46
+VF[1] span=1596 LDS_issues=192 LDS_busy=1031 LDS_B/cyc=15.89
+benches/sv3/lds-boost/runs/v2_pair-n2048-k8-t256/npusim/npusim_20261118101019_launch_flip.py/record/instr.bin
+== v3_row-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=4424 el/cyc=0.46 mac/cyc=3.70 IPC=0.89 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=2817 LDS_issues=192 LDS_busy=796 LDS_B/cyc=20.58
+VF[1] span=1607 LDS_issues=192 LDS_busy=582 LDS_B/cyc=28.15
+benches/sv3/lds-boost/runs/v3_row-n2048-k8-t256/npusim/npusim_20261118101116_launch_flip.py/record/instr.bin
+== v3_row-n2048-k8-t256-nosync
+PASS maxabs=1.192e-07
+launches=2 VF=4812 el/cyc=0.43 mac/cyc=3.40 IPC=0.81 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=3222 LDS_issues=192 LDS_busy=1143 LDS_B/cyc=14.33
+VF[1] span=1590 LDS_issues=192 LDS_busy=647 LDS_B/cyc=25.32
+benches/sv3/lds-boost/runs/v3_row-n2048-k8-t256-nosync/npusim/npusim_20261118101216_launch_flip.py/record/instr.bin
+done -> benches/sv3/lds-boost/results_rebuild.txt

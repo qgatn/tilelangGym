@@ -1,0 +1,7 @@
+# C: IADD/pipe audit — pure burst vs GEMV VF window
+pure_fp32_t256: VF=1864 LDS_issues=768 LDS_busy=1288 addr_in_LDS_busy={'SIMT_IADD_I': 9, 'SIMT_LEA': 10, 'SIMT_IADD': 0} other_pipe_ticks_in_LDS_busy=4218
+pure_pack_t256: VF=533 LDS_issues=128 LDS_busy=203 addr_in_LDS_busy={'SIMT_IADD_I': 0, 'SIMT_LEA': 10, 'SIMT_IADD': 0} other_pipe_ticks_in_LDS_busy=1566
+quad_acc-n2048-k8-t256-nosync: VF=850 LDS_issues=160 LDS_busy=576 addr_in_LDS_busy={'SIMT_IADD_I': 0, 'SIMT_LEA': 0, 'SIMT_IADD': 0} other_pipe_ticks_in_LDS_busy=9260
+dbl_buf-n2048-k8-t256: VF=1070 LDS_issues=160 LDS_busy=641 addr_in_LDS_busy={'SIMT_IADD_I': 0, 'SIMT_LEA': 0, 'SIMT_IADD': 0} other_pipe_ticks_in_LDS_busy=9997
+serial-n2048-k8-t256: VF=1472 LDS_issues=160 LDS_busy=1086 addr_in_LDS_busy={'SIMT_IADD_I': 0, 'SIMT_LEA': 0} other_pipe_ticks_in_LDS_busy=11264
+ub-n2048-k8-t256: VF=4438 LDS_issues=576 LDS_busy=4242 addr_in_LDS_busy={'SIMT_IADD_I': 0, 'SIMT_LEA': 0, 'SIMT_IADD': 9} other_pipe_ticks_in_LDS_busy=23986

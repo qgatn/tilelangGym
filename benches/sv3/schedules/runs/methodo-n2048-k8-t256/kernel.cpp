@@ -21,8 +21,13 @@ __simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_0(__ubuf__ ui
   }
   for (int32_t k = 0; k < 8; ++k) {
     #pragma unroll
-    for (int32_t i_2 = 0; i_2 < 4; ++i_2) {
-      acc[i_2] = (acc[i_2] + (((float)((__ubuf__ half*)buf_dyn_shmem)[(((((i_2 >> 1) * 4096) + (((int32_t)threadIdx.x) * 16)) + ((i_2 & 1) * 8)) + k)]) * xf[k]));
+    for (int32_t i_2 = 0; i_2 < 2; ++i_2) {
+      half a_ub_local_cast_1[2];
+      *(uint1*)(a_ub_local_cast_1 + 0) = *(__ubuf__ uint1*)(((__ubuf__ half*)buf_dyn_shmem) + (((k * 1024) + (i_2 * 512)) + (((int32_t)threadIdx.x) * 2)));
+      float2 __1;
+        uint1 v__1 = *(uint1*)(a_ub_local_cast_1 + 0);
+        ((float2*)(&__1))[0] = __half22float2(((half2*)(&v__1))[0]);
+      *(float2*)(acc + (i_2 * 2)) = (*(float2*)(acc + (i_2 * 2)) + (__1 * make_float2(xf[k], xf[k])));
     }
   }
   asc_syncthreads();
@@ -39,7 +44,7 @@ extern "C" __global__ __vector__ void main_kernel(__gm__ half* A, __gm__ float* 
   asc_copy_gm2ub_align((__ubuf__ uint8_t*)((&(((__ubuf__ half*)buf_dyn_shmem)[12288]))), (__gm__ uint8_t*)((&(X[0]))), 1, 16, 0, 0, 0, static_cast<asc_load_l2_cache_mode>(0), 16, 16);
   for (int32_t s = 0; s < 2; ++s) {
     asc_sync_wait(PIPE_V, PIPE_MTE2, static_cast<event_t>(0));
-    asc_copy_gm2ub_align((__ubuf__ uint8_t*)((&(((__ubuf__ half*)buf_dyn_shmem)[0]))), (__gm__ uint8_t*)((&(A[(s * 8192)]))), 1, 16384, 0, 0, 0, static_cast<asc_load_l2_cache_mode>(0), 16384, 16384);
+    asc_copy_gm2ub_align((__ubuf__ uint8_t*)((&(((__ubuf__ half*)buf_dyn_shmem)[0]))), (__gm__ uint8_t*)((&(A[(s * 1024)]))), 8, 2048, 0, 0, 0, static_cast<asc_load_l2_cache_mode>(0), 4096, 2048);
     asc_sync_notify(PIPE_MTE2, PIPE_V, static_cast<event_t>(0));
     asc_sync_wait(PIPE_MTE2, PIPE_V, static_cast<event_t>(0));
     asc_vf_call<main_kernel_simt_vf_0>(cce::dim3(256), buf_dyn_shmem, s);

@@ -1,0 +1,11 @@
+== quad_acc2-n2048-k8-t512
+PASS maxabs=1.192e-07
+launches=2 VF=1996 el/cyc=1.03 mac/cyc=8.21 IPC=1.07 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== serial-n2048-k8-t512
+PASS maxabs=1.192e-07
+launches=2 VF=3390 el/cyc=0.60 mac/cyc=4.83 IPC=0.59 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== dbl_buf-n2048-k8-t512
+PASS maxabs=1.192e-07
+launches=2 VF=2044 el/cyc=1.00 mac/cyc=8.02 IPC=1.02 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+== quad_acc_pack-n2048-k8-t256
+COMPILE_FAIL

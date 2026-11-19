@@ -21,8 +21,7 @@ Artifacts:
 
 - Baseline: `../single-op/pure_burst.asc` (`PURE_OP=FFMA`=2, `PURE_KIND=2`)
 - Dual experiment: `../single-op/ffma_s3_dual_vf.asc`
-- Traces: `../single-op/build/npusim_pure_ffmak2_t256/`, `…/npusim_ffma_s3_dual_vf_t256/`
-- Charts: `plots/icache_ffma_*`
+- Charts: `plots/icache_ffma_*`. The raw `single-op/build` traces those charts were drawn from are not kept.
 
 ---
 

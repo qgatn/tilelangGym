@@ -1,8 +1,0 @@
-ldspw_fp32_t512_v0_n49152 op=SIMT_LDS n=1536 span=2070 busy=2070 act_min=27 act_med=28 act_max=36
-ldspw_fp32_t512_v1_n49152 op=SIMT_LDS n=1536 span=2070 busy=2070 act_min=27 act_med=28 act_max=36
-ldspw_fp32_t512_v2_n49152 op=SIMT_LDS n=1536 span=2049 busy=2049 act_min=27 act_med=28 act_max=36
-ldspw_bf16x2_t512_v0_n49152 op=SIMT_LDS n=1536 span=2070 busy=2070 act_min=27 act_med=28 act_max=36
-ldspw_bf16x2_t512_v1_n49152 op=SIMT_LDS n=1536 span=2070 busy=2070 act_min=27 act_med=28 act_max=36
-ldspw_fp32_t1024_v0_n49152 op=SIMT_LDS n=1536 span=2012 busy=2012 act_min=27 act_med=28 act_max=47
-ldspw_fp32_t1024_v1_n49152 op=SIMT_LDS n=1536 span=2012 busy=2012 act_min=27 act_med=28 act_max=47
-SWEEP_DONE

@@ -230,8 +230,8 @@ def draw_instr(case: Path, title: str, out_name: str, kind: str):
 
 def draw_n():
     ns = [128, 256, 512, 1024, 2048]
-    thread = [19308, 36210, 75455, 155646, 570802]
-    warp = [12461, 23708, 46810, 89806, 177125]
+    thread = [64493, 68114, 80067, 82842, 86750]
+    warp = [20730, 38033, 93753, 184315, 449953]
     fig, ax = plt.subplots(figsize=(8.2, 3.6), dpi=200)
     ax.plot(ns, thread, marker="o", color="#1f4e79", label="Thread")
     ax.plot(ns, warp, marker="o", color="#c45c26", label="Warp")

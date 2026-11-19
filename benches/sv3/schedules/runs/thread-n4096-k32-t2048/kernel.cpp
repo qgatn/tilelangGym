@@ -7,10 +7,12 @@ __simt_vf__ __launch_bounds__(2048) inline void main_kernel_simt_vf_0(__gm__ hal
   *(float2*)(acc + 0) = make_float2(broadcast_var, broadcast_var);
   for (int32_t k = 0; k < 32; ++k) {
     xk = ((float)X[k]);
-    #pragma unroll
-    for (int32_t i = 0; i < 2; ++i) {
-      acc[i] = (acc[i] + (((float)A[(((((int32_t)threadIdx.x) * 64) + (i * 32)) + k)]) * xk));
-    }
+    half A_local_cast[2];
+    *(uint1*)(A_local_cast + 0) = *(__gm__ uint1*)(A + ((k * 4096) + (((int32_t)threadIdx.x) * 2)));
+    float2 _;
+      uint1 v_ = *(uint1*)(A_local_cast + 0);
+      ((float2*)(&_))[0] = __half22float2(((half2*)(&v_))[0]);
+    *(float2*)(acc + 0) = (*(float2*)(acc + 0) + (_ * make_float2(xk, xk)));
   }
   *(__ubuf__ float2*)(out_ub + (((int32_t)threadIdx.x) * 2)) = *(float2*)(acc + 0);
 }

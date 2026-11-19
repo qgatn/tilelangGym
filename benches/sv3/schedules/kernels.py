@@ -1,6 +1,6 @@
 """SV3 GEMV schedule TileLang kernels (the schedules/ tree).
 
-Out[n] = sum_k A[n, k] * x[k], fp16 in, fp32 out.
+Out[n] = sum_k A[k, n] * x[k], fp16 in, fp32 out.
 
 Read with: benches/sv3/simt-uarch/SV3-theoretical.md
 Compile:   python compile.py <name> N K [threads] [--nosync]
@@ -53,17 +53,17 @@ def build_ub_methodo(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((slab,), "float32")
                     for n in T.Parallel(slab):
@@ -75,7 +75,7 @@ def build_ub_methodo(N: int, K: int, threads: int | None = None):
                     # stage 3: batched multiply over the thread's slab columns
                     for k in T.serial(K):
                         for n in T.Parallel(slab):
-                            acc[n] = acc[n] + T.Cast("float32", a_ub[n, k]) * xf[k]
+                            acc[n] = acc[n] + T.Cast("float32", a_ub[k, n]) * xf[k]
                     for n in T.Parallel(slab):
                         out_ub[s * slab + n] = acc[n]
             T.copy(out_ub, Out)
@@ -92,17 +92,17 @@ def build_ub_serial(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((slab,), "float32")
                     xf = T.alloc_fragment((K,), "float32")
@@ -111,7 +111,7 @@ def build_ub_serial(N: int, K: int, threads: int | None = None):
                     for k in T.Parallel(K):
                         xf[k] = T.Cast("float32", x_ub[k])
                     for n, k in T.Parallel(slab, K):
-                        af[n, k] = T.Cast("float32", a_ub[n, k])
+                        af[n, k] = T.Cast("float32", a_ub[k, n])
                     # stage 3: pure multiply
                     for n in T.Parallel(slab):
                         acc[n] = T.float32(0)
@@ -144,17 +144,17 @@ def build_ub_warp_pipe(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     # strip-local scratch (smaller than serial's whole-slab af)
                     acc = T.alloc_fragment((threads,), "float32")
@@ -165,7 +165,7 @@ def build_ub_warp_pipe(N: int, K: int, threads: int | None = None):
                     for t in T.serial(n_strips):
                         for n, k in T.Parallel(threads, K):
                             af[n, k] = T.Cast(
-                                "float32", a_ub[t * threads + n, k]
+                                "float32", a_ub[k, t * threads + n]
                             )
                         for n in T.Parallel(threads):
                             acc[n] = T.float32(0)
@@ -198,17 +198,17 @@ def build_ub_dbl_buf(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((threads,), "float32")
                     xf = T.alloc_fragment((K,), "float32")
@@ -219,7 +219,7 @@ def build_ub_dbl_buf(N: int, K: int, threads: int | None = None):
 
                     # Prolog: load strip 0 → af0
                     for n, k in T.Parallel(threads, K):
-                        af0[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0[n, k] = T.Cast("float32", a_ub[k, n])
 
                     # Steady (unrolled): prefetch t+1, then mac+store t
                     for t in range(n_strips - 1):
@@ -227,7 +227,7 @@ def build_ub_dbl_buf(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af1[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[(t + 1) * threads + n, k],
+                                    a_ub[k, (t + 1) * threads + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -240,7 +240,7 @@ def build_ub_dbl_buf(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af0[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[(t + 1) * threads + n, k],
+                                    a_ub[k, (t + 1) * threads + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -298,17 +298,17 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((threads,), "float32")
                     xf = T.alloc_fragment((K,), "float32")
@@ -321,14 +321,14 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
 
                     # Prolog: strips 0..2 in flight before any compute
                     for n, k in T.Parallel(threads, K):
-                        af0[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0[n, k] = T.Cast("float32", a_ub[k, n])
                     for n, k in T.Parallel(threads, K):
                         af1[n, k] = T.Cast(
-                            "float32", a_ub[threads + n, k]
+                            "float32", a_ub[k, threads + n]
                         )
                     for n, k in T.Parallel(threads, K):
                         af2[n, k] = T.Cast(
-                            "float32", a_ub[(2 * threads) + n, k]
+                            "float32", a_ub[k, (2 * threads) + n]
                         )
 
                     # Steady: prefetch strip t+3, then mac+store strip t
@@ -337,7 +337,7 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af3[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -350,7 +350,7 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af0[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -363,7 +363,7 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af1[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -376,7 +376,7 @@ def build_ub_dbl_buf_quad(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af2[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -505,17 +505,17 @@ def build_ub_quad_acc(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     # One accumulator per chain; fragments are SPLIT so each
                     # buffer sees exactly one index expression per parallel
@@ -544,14 +544,14 @@ def build_ub_quad_acc(N: int, K: int, threads: int | None = None):
 
                     # Prolog: strips 0..2 in flight before any compute
                     for n, k in T.Parallel(threads, 4):
-                        af0a[n, k] = T.Cast("float32", a_ub[n, k])
-                        af0b[n, k] = T.Cast("float32", a_ub[n, 4 + k])
+                        af0a[n, k] = T.Cast("float32", a_ub[k, n])
+                        af0b[n, k] = T.Cast("float32", a_ub[4 + k, n])
                     for n, k in T.Parallel(threads, 4):
-                        af1a[n, k] = T.Cast("float32", a_ub[threads + n, k])
-                        af1b[n, k] = T.Cast("float32", a_ub[threads + n, 4 + k])
+                        af1a[n, k] = T.Cast("float32", a_ub[k, threads + n])
+                        af1b[n, k] = T.Cast("float32", a_ub[4 + k, threads + n])
                     for n, k in T.Parallel(threads, 4):
-                        af2a[n, k] = T.Cast("float32", a_ub[(2 * threads) + n, k])
-                        af2b[n, k] = T.Cast("float32", a_ub[(2 * threads) + n, 4 + k])
+                        af2a[n, k] = T.Cast("float32", a_ub[k, (2 * threads) + n])
+                        af2b[n, k] = T.Cast("float32", a_ub[4 + k, (2 * threads) + n])
 
                     for n in T.Parallel(threads):
                         accA[n] = T.float32(0)
@@ -566,8 +566,8 @@ def build_ub_quad_acc(N: int, K: int, threads: int | None = None):
                     # Steady: prefetch strip 3, then mac strip 0 over the two
                     # half-fragments (two chains, dependency depth 4 each)
                     for n, k in T.Parallel(threads, 4):
-                        af3a[n, k] = T.Cast("float32", a_ub[(3 * threads) + n, k])
-                        af3b[n, k] = T.Cast("float32", a_ub[(3 * threads) + n, 4 + k])
+                        af3a[n, k] = T.Cast("float32", a_ub[k, (3 * threads) + n])
+                        af3b[n, k] = T.Cast("float32", a_ub[4 + k, (3 * threads) + n])
                     for k in T.serial(4):
                         for n in T.Parallel(threads):
                             accA[n] = accA[n] + af0a[n, k] * xfa[k]
@@ -619,17 +619,17 @@ def build_ub_dbl_buf_twice(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 # --- identical VF #1 (warm / first) ---
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((threads,), "float32")
@@ -639,12 +639,12 @@ def build_ub_dbl_buf_twice(N: int, K: int, threads: int | None = None):
                     for k in T.Parallel(K):
                         xf[k] = T.Cast("float32", x_ub[k])
                     for n, k in T.Parallel(threads, K):
-                        af0[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0[n, k] = T.Cast("float32", a_ub[k, n])
                     for t in range(n_strips - 1):
                         if t % 2 == 0:
                             for n, k in T.Parallel(threads, K):
                                 af1[n, k] = T.Cast(
-                                    "float32", a_ub[(t + 1) * threads + n, k]
+                                    "float32", a_ub[k, (t + 1) * threads + n]
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -656,7 +656,7 @@ def build_ub_dbl_buf_twice(N: int, K: int, threads: int | None = None):
                         else:
                             for n, k in T.Parallel(threads, K):
                                 af0[n, k] = T.Cast(
-                                    "float32", a_ub[(t + 1) * threads + n, k]
+                                    "float32", a_ub[k, (t + 1) * threads + n]
                                 )
                             for n in T.Parallel(threads):
                                 acc[n] = T.float32(0)
@@ -691,12 +691,12 @@ def build_ub_dbl_buf_twice(N: int, K: int, threads: int | None = None):
                     for k in T.Parallel(K):
                         xf2[k] = T.Cast("float32", x_ub[k])
                     for n, k in T.Parallel(threads, K):
-                        af0b[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0b[n, k] = T.Cast("float32", a_ub[k, n])
                     for t in range(n_strips - 1):
                         if t % 2 == 0:
                             for n, k in T.Parallel(threads, K):
                                 af1b[n, k] = T.Cast(
-                                    "float32", a_ub[(t + 1) * threads + n, k]
+                                    "float32", a_ub[k, (t + 1) * threads + n]
                                 )
                             for n in T.Parallel(threads):
                                 acc2[n] = T.float32(0)
@@ -708,7 +708,7 @@ def build_ub_dbl_buf_twice(N: int, K: int, threads: int | None = None):
                         else:
                             for n, k in T.Parallel(threads, K):
                                 af0b[n, k] = T.Cast(
-                                    "float32", a_ub[(t + 1) * threads + n, k]
+                                    "float32", a_ub[k, (t + 1) * threads + n]
                                 )
                             for n in T.Parallel(threads):
                                 acc2[n] = T.float32(0)
@@ -770,18 +770,18 @@ def build_ub_vfsplit(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             p_ub = T.alloc_shared((slab * 4,), "float32")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 # ---- VF A: strided pure-load band + per-word partial sums ----
                 with T.SimtVF(threads):
                     xf = T.alloc_fragment((K,), "float32")
@@ -868,17 +868,17 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((threads,), "float32")
                     xf = T.alloc_fragment((K,), "float32")
@@ -891,14 +891,14 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
 
                     # Prolog: strips 0..2 in flight before any compute
                     for n, k in T.Parallel(threads, K):
-                        af0[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0[n, k] = T.Cast("float32", a_ub[k, n])
                     for n, k in T.Parallel(threads, K):
                         af1[n, k] = T.Cast(
-                            "float32", a_ub[threads + n, k]
+                            "float32", a_ub[k, threads + n]
                         )
                     for n, k in T.Parallel(threads, K):
                         af2[n, k] = T.Cast(
-                            "float32", a_ub[(2 * threads) + n, k]
+                            "float32", a_ub[k, (2 * threads) + n]
                         )
 
                     # Steady: mac+store strip t FIRST, prefetch strip t+3 LAST
@@ -914,7 +914,7 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af3[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                         elif (t % 4) == 1:
                             for n in T.Parallel(threads):
@@ -927,7 +927,7 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af0[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                         elif (t % 4) == 2:
                             for n in T.Parallel(threads):
@@ -940,7 +940,7 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af1[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
                         else:
                             for n in T.Parallel(threads):
@@ -953,7 +953,7 @@ def build_ub_quad_reord(N: int, K: int, threads: int | None = None):
                             for n, k in T.Parallel(threads, K):
                                 af2[n, k] = T.Cast(
                                     "float32",
-                                    a_ub[((t + 3) * threads) + n, k],
+                                    a_ub[k, ((t + 3) * threads) + n],
                                 )
 
                     # Epilog: mac+store strips n_strips-3 .. n_strips-1.
@@ -1075,17 +1075,17 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((threads,), "float32")
                     xf = T.alloc_fragment((K,), "float32")
@@ -1098,14 +1098,14 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
 
                     # Prolog: strips 0..2 in flight before any compute
                     for n, k in T.Parallel(threads, K):
-                        af0[n, k] = T.Cast("float32", a_ub[n, k])
+                        af0[n, k] = T.Cast("float32", a_ub[k, n])
                     for n, k in T.Parallel(threads, K):
                         af1[n, k] = T.Cast(
-                            "float32", a_ub[threads + n, k]
+                            "float32", a_ub[k, threads + n]
                         )
                     for n, k in T.Parallel(threads, K):
                         af2[n, k] = T.Cast(
-                            "float32", a_ub[(2 * threads) + n, k]
+                            "float32", a_ub[k, (2 * threads) + n]
                         )
 
                     # Steady: per k-chunk, convert chunk of strip t+3, then
@@ -1119,7 +1119,7 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
                                 for n, k in T.Parallel(threads, kc):
                                     af3[n, k0 + k] = T.Cast(
                                         "float32",
-                                        a_ub[((t + 3) * threads) + n, k0 + k],
+                                        a_ub[k0 + k, ((t + 3) * threads) + n],
                                     )
                                 for k in T.serial(kc):
                                     for n in T.Parallel(threads):
@@ -1134,7 +1134,7 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
                                 for n, k in T.Parallel(threads, kc):
                                     af0[n, k0 + k] = T.Cast(
                                         "float32",
-                                        a_ub[((t + 3) * threads) + n, k0 + k],
+                                        a_ub[k0 + k, ((t + 3) * threads) + n],
                                     )
                                 for k in T.serial(kc):
                                     for n in T.Parallel(threads):
@@ -1149,7 +1149,7 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
                                 for n, k in T.Parallel(threads, kc):
                                     af1[n, k0 + k] = T.Cast(
                                         "float32",
-                                        a_ub[((t + 3) * threads) + n, k0 + k],
+                                        a_ub[k0 + k, ((t + 3) * threads) + n],
                                     )
                                 for k in T.serial(kc):
                                     for n in T.Parallel(threads):
@@ -1164,7 +1164,7 @@ def build_ub_quad_ilv(N: int, K: int, threads: int | None = None, kc: int = 2):
                                 for n, k in T.Parallel(threads, kc):
                                     af2[n, k0 + k] = T.Cast(
                                         "float32",
-                                        a_ub[((t + 3) * threads) + n, k0 + k],
+                                        a_ub[k0 + k, ((t + 3) * threads) + n],
                                     )
                                 for k in T.serial(kc):
                                     for n in T.Parallel(threads):

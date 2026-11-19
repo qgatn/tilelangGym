@@ -35,7 +35,7 @@ def build_thread(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
@@ -49,7 +49,7 @@ def build_thread(N: int, K: int, threads: int | None = None):
                     xk = T.alloc_var("float32")
                     xk = T.Cast("float32", X[k])
                     for n in T.Parallel(N):
-                        acc[n] = acc[n] + T.Cast("float32", A[n, k]) * xk
+                        acc[n] = acc[n] + T.Cast("float32", A[k, n]) * xk
                 for n in T.Parallel(N):
                     out_ub[n] = acc[n]
             T.copy(out_ub, Out)
@@ -80,17 +80,17 @@ def build_thread_ub(N: int, K: int, threads: int | None = None):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
         with T.Kernel(1):
-            a_ub = T.alloc_shared((slab, K), "float16")
+            a_ub = T.alloc_shared((K, slab), "float16")
             x_ub = T.alloc_shared((K,), "float16")
             out_ub = T.alloc_shared((N,), "float32")
             T.copy(X, x_ub)
             for s in T.serial(N // slab):
-                T.copy(A[s * slab : (s + 1) * slab, :], a_ub)
+                T.copy(A[:, s * slab : (s + 1) * slab], a_ub)
                 with T.SimtVF(threads):
                     acc = T.alloc_fragment((slab,), "float32")
                     for n in T.Parallel(slab):
@@ -99,7 +99,7 @@ def build_thread_ub(N: int, K: int, threads: int | None = None):
                         xk = T.alloc_var("float32")
                         xk = T.Cast("float32", x_ub[k])
                         for n in T.Parallel(slab):
-                            acc[n] = acc[n] + T.Cast("float32", a_ub[n, k]) * xk
+                            acc[n] = acc[n] + T.Cast("float32", a_ub[k, n]) * xk
                     for n in T.Parallel(slab):
                         out_ub[s * slab + n] = acc[n]
             T.copy(out_ub, Out)
@@ -118,7 +118,7 @@ def build_warp(N: int, K: int):
 
     @T.prim_func
     def main(
-        A: T.Tensor((N, K), "float16"),
+        A: T.Tensor((K, N), "float16"),
         X: T.Tensor((K,), "float16"),
         Out: T.Tensor((N,), "float32"),
     ):
@@ -134,11 +134,11 @@ def build_warp(N: int, K: int):
                     acc = T.float32(0)
                     if narrow:
                         if lane < K:
-                            acc = acc + T.Cast("float32", A[n, lane]) * T.Cast("float32", X[lane])
+                            acc = acc + T.Cast("float32", A[lane, n]) * T.Cast("float32", X[lane])
                     else:
                         for t in T.serial(steps):
                             k = lane + t * WARP
-                            acc = acc + T.Cast("float32", A[n, k]) * T.Cast("float32", X[k])
+                            acc = acc + T.Cast("float32", A[k, n]) * T.Cast("float32", X[k])
                     total = T.alloc_var("float32")
                     total = T.warp_reduce_sum(acc)
                     if lane == 0:

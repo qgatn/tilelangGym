@@ -47,11 +47,14 @@ def _chk(rc, what):
 
 def main():
     so, n, k = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+    # simd stores A as (N, K). Pass "nk" so the same products are A[n, k] = A[k, n].
+    layout = sys.argv[4] if len(sys.argv) > 4 else "kn"
     rng = np.random.RandomState(2026)
-    A = rng.uniform(-1, 1, (n, k)).astype(np.float16)
+    A = rng.uniform(-1, 1, (k, n)).astype(np.float16)
     X = rng.uniform(-1, 1, (k,)).astype(np.float16)
-    gold = (A.astype(np.float32) * X.astype(np.float32)[None, :]).sum(axis=1)
-    a_bytes, x_bytes, o_bytes = A.nbytes, X.nbytes, n * 4
+    gold = (A.astype(np.float32) * X.astype(np.float32)[:, None]).sum(axis=0)
+    host_a = np.ascontiguousarray(A.T if layout == "nk" else A)
+    a_bytes, x_bytes, o_bytes = host_a.nbytes, X.nbytes, n * 4
     lib = _load_acl()
     kern = ctypes.CDLL(so)
     kern.init.restype = ctypes.c_int
@@ -67,7 +70,7 @@ def main():
     _chk(lib.aclrtMalloc(ctypes.byref(ad), a_bytes, _ACL_MEM_MALLOC_HUGE_FIRST), "ma")
     _chk(lib.aclrtMalloc(ctypes.byref(xd), x_bytes, _ACL_MEM_MALLOC_HUGE_FIRST), "mx")
     _chk(lib.aclrtMalloc(ctypes.byref(od), o_bytes, _ACL_MEM_MALLOC_HUGE_FIRST), "mo")
-    _chk(lib.aclrtMemcpy(ad, a_bytes, np.ascontiguousarray(A).ctypes.data_as(ctypes.c_void_p), a_bytes, _ACL_MEMCPY_HOST_TO_DEVICE), "h2d-a")
+    _chk(lib.aclrtMemcpy(ad, a_bytes, host_a.ctypes.data_as(ctypes.c_void_p), a_bytes, _ACL_MEMCPY_HOST_TO_DEVICE), "h2d-a")
     _chk(lib.aclrtMemcpy(xd, x_bytes, np.ascontiguousarray(X).ctypes.data_as(ctypes.c_void_p), x_bytes, _ACL_MEMCPY_HOST_TO_DEVICE), "h2d-x")
     rc = kern.call(ad, xd, od, st)
     if rc != 0:

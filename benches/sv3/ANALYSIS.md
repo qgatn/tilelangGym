@@ -2,11 +2,13 @@
 
 ## 1. Test-case design
 
-`N` is the number of outputs. `K` is the length of the sum. `k` runs from 0 to `K - 1`. `A` is `(N, K)`. `x` has length `K`. `Out` has length `N`.
+`N` is the number of outputs. `K` is the length of the sum. `k` runs from 0 to `K - 1`. `A` is `(K, N)`. `x` has length `K`. `Out` has length `N`.
 
 ```text
-Out[n] = sum_k A[n, k] * x[k]
+Out[n] = sum_k A[k, n] * x[k]
 ```
+
+The performance tables below were measured on the previous `A[n, k]` storage. The formula in this section is `A[k, n]`. The schedule ladder at `N = 2048`, `K = 8` is remeasured in `simt-uarch/SV3-theoretical.md` (Table 3a).
 
 el/cyc is output elements per cycle, `N / VF`. One element is one result in `Out`. mac/cyc is products per cycle, `N × K / VF`. One product is one element of `A`.
 
@@ -16,7 +18,7 @@ The stock SIMT launch is 256 threads. The head-to-head search is 128, 256, 512, 
 
 ## 2. Layout and schedule
 
-`A[n, k]` is contiguous in `k`. One output is the `K` values on that row of `A`.
+`x` is one row of length `K`. `A[k, n]` is contiguous in `n`. One output is column `n` of `A`.
 
 ### 2.1 SIMD
 
@@ -42,7 +44,7 @@ thread t owns its outputs
 for each owned n:
     partial = 0
     for k in 0 .. K-1:
-        partial += A[n, k] * x[k]
+        partial += A[k, n] * x[k]
     Out[n] = partial
 ```
 
@@ -53,7 +55,7 @@ A warp is 32 threads. The stock launch is 256 threads, which is 8 warps. Each wa
 `K = 8` and `K = 16`. Only the first `K` lanes load. The other lanes add 0, and all 32 lanes enter the sum.
 
 ```text
-lane t, when t < K:  acc = A[n, t] * x[t]
+lane t, when t < K:  acc = A[t, n] * x[t]
                       redux across the 32 lanes
 lane 0 stores Out[n]
 ```
@@ -61,7 +63,7 @@ lane 0 stores Out[n]
 `K = 32`. One element per lane, then the sum.
 
 ```text
-lane t:  acc = A[n, t] * x[t]
+lane t:  acc = A[t, n] * x[t]
          redux across the 32 lanes
 lane 0 stores Out[n]
 ```
@@ -71,7 +73,7 @@ lane 0 stores Out[n]
 ```text
 lane t:  acc = 0
          for step in 0 .. K/32 - 1:
-             acc += A[n, t + step * 32] * x[t + step * 32]
+             acc += A[t + step * 32, n] * x[t + step * 32]
          redux across the 32 lanes
 lane 0 stores Out[n]
 ```
@@ -148,10 +150,10 @@ lane 0 stores Out[n]
 <tr>
 <td align="center">128</td>
 <td align="center">1</td>
-<td align="center">2553</td>
+<td align="center">2559</td>
 <td align="center">0.050</td>
-<td align="center">6.42</td>
-<td align="center">1.56</td>
+<td align="center">6.40</td>
+<td align="center">3.11</td>
 </tr>
 <tr>
 <td align="center">256</td>
@@ -212,24 +214,24 @@ lane 0 stores Out[n]
 <tbody>
 <tr>
 <td align="center">8</td>
-<td align="center"><b>13143</b></td><td align="center">0.31</td><td align="center">2.49</td><td align="center">0.43</td><td align="center">96089</td><td align="center">0.04</td><td align="center">0.34</td><td align="center">0.73</td><td align="center">82946</td>
+<td align="center"><b>17207</b></td><td align="center">0.24</td><td align="center">1.90</td><td align="center">0.20</td><td align="center">80114</td><td align="center">0.05</td><td align="center">0.41</td><td align="center">0.92</td><td align="center">62907</td>
 </tr>
 <tr>
 <td align="center">16</td>
-<td align="center"><b>40304</b></td><td align="center">0.10</td><td align="center">1.63</td><td align="center">0.27</td><td align="center">125354</td><td align="center">0.03</td><td align="center">0.52</td><td align="center">0.56</td><td align="center">85050</td>
+<td align="center"><b>30993</b></td><td align="center">0.13</td><td align="center">2.11</td><td align="center">0.21</td><td align="center">110816</td><td align="center">0.04</td><td align="center">0.59</td><td align="center">0.67</td><td align="center">79823</td>
 </tr>
 <tr>
 <td align="center">32</td>
-<td align="center">234340</td><td align="center">0.02</td><td align="center">0.56</td><td align="center">0.09</td><td align="center"><b>182059</b></td><td align="center">0.02</td><td align="center">0.72</td><td align="center">0.32</td><td align="center">−52281</td>
+<td align="center"><b>61100</b></td><td align="center">0.07</td><td align="center">2.15</td><td align="center">0.21</td><td align="center">164865</td><td align="center">0.02</td><td align="center">0.80</td><td align="center">0.35</td><td align="center">103765</td>
 </tr>
 <tr>
 <td align="center">64</td>
-<td align="center">577735</td><td align="center">0.01</td><td align="center">0.45</td><td align="center">0.07</td><td align="center"><b>336183</b></td><td align="center">0.01</td><td align="center">0.78</td><td align="center">0.24</td><td align="center">−241552</td>
+<td align="center"><b>121460</b></td><td align="center">0.03</td><td align="center">2.16</td><td align="center">0.21</td><td align="center">344821</td><td align="center">0.01</td><td align="center">0.76</td><td align="center">0.23</td><td align="center">223361</td>
 </tr>
 </tbody>
 </table>
 
-The thread map is shorter at `K = 8` and `K = 16`. The warp map is shorter at `K = 32` and `K = 64`.
+The thread map is shorter at every `K` in this table. `LDK` and `STK` are 0.
 
 **Table 4.** SIMT thread and warp, doubling N. `K = 128`.
 
@@ -249,28 +251,28 @@ The thread map is shorter at `K = 8` and `K = 16`. The warp map is shorter at `K
 <tbody>
 <tr>
 <td align="center">128</td>
-<td align="center">19308</td><td align="center">0.007</td><td align="center">0.85</td><td align="center">0.29</td><td align="center"><b>12461</b></td><td align="center">0.010</td><td align="center">1.31</td><td align="center">0.33</td><td align="center">−6847</td>
+<td align="center">64493</td><td align="center">0.002</td><td align="center">0.25</td><td align="center">0.09</td><td align="center"><b>20730</b></td><td align="center">0.006</td><td align="center">0.79</td><td align="center">0.19</td><td align="center">−43763</td>
 </tr>
 <tr>
 <td align="center">256</td>
-<td align="center">36210</td><td align="center">0.007</td><td align="center">0.90</td><td align="center">0.31</td><td align="center"><b>23708</b></td><td align="center">0.011</td><td align="center">1.38</td><td align="center">0.33</td><td align="center">−12502</td>
+<td align="center">68114</td><td align="center">0.004</td><td align="center">0.48</td><td align="center">0.18</td><td align="center"><b>38033</b></td><td align="center">0.007</td><td align="center">0.86</td><td align="center">0.20</td><td align="center">−30081</td>
 </tr>
 <tr>
 <td align="center">512</td>
-<td align="center">75455</td><td align="center">0.007</td><td align="center">0.87</td><td align="center">0.19</td><td align="center"><b>46810</b></td><td align="center">0.011</td><td align="center">1.40</td><td align="center">0.33</td><td align="center">−28645</td>
+<td align="center"><b>80067</b></td><td align="center">0.006</td><td align="center">0.82</td><td align="center">0.17</td><td align="center">93753</td><td align="center">0.005</td><td align="center">0.70</td><td align="center">0.16</td><td align="center">13686</td>
 </tr>
 <tr>
 <td align="center">1024</td>
-<td align="center">155646</td><td align="center">0.007</td><td align="center">0.84</td><td align="center">0.16</td><td align="center"><b>89806</b></td><td align="center">0.011</td><td align="center">1.46</td><td align="center">0.34</td><td align="center">−65840</td>
+<td align="center"><b>82842</b></td><td align="center">0.012</td><td align="center">1.58</td><td align="center">0.21</td><td align="center">184315</td><td align="center">0.006</td><td align="center">0.71</td><td align="center">0.16</td><td align="center">101473</td>
 </tr>
 <tr>
 <td align="center">2048</td>
-<td align="center">570802</td><td align="center">0.004</td><td align="center">0.46</td><td align="center">0.08</td><td align="center"><b>177125</b></td><td align="center">0.012</td><td align="center">1.48</td><td align="center">0.35</td><td align="center">−393677</td>
+<td align="center"><b>86750</b></td><td align="center">0.024</td><td align="center">3.02</td><td align="center">0.30</td><td align="center">449953</td><td align="center">0.005</td><td align="center">0.58</td><td align="center">0.13</td><td align="center">363203</td>
 </tr>
 </tbody>
 </table>
 
-The warp map is shorter at every `N` in this table. Below 256 cells the thread launch is one thread per cell. The warp launch stays 256 threads.
+The warp map is shorter at `N = 128` and `N = 256`. The thread map is shorter at `N = 512`, `1024`, and `2048`. Below 256 cells the thread launch is one thread per cell. The warp launch stays 256 threads.
 
 **Figure 1.** VF as N doubles. `K = 128`. Thread and warp.
 
@@ -297,42 +299,42 @@ Shape `N = 4096`, `K = 32`. The launch is 128, 256, 512, 1024, and 2048 threads.
 <tr>
 <td align="center">128</td>
 <td align="center">32</td>
-<td align="center">259636</td>
-<td align="center">0.02</td>
-<td align="center">0.50</td>
-<td align="center">0.08</td>
+<td align="center">62348</td>
+<td align="center">0.07</td>
+<td align="center">2.10</td>
+<td align="center">0.19</td>
 </tr>
 <tr>
 <td align="center">256</td>
 <td align="center">16</td>
-<td align="center">234340</td>
-<td align="center">0.02</td>
-<td align="center">0.56</td>
-<td align="center">0.09</td>
+<td align="center">61100</td>
+<td align="center">0.07</td>
+<td align="center">2.15</td>
+<td align="center">0.21</td>
 </tr>
 <tr>
 <td align="center">512</td>
 <td align="center">8</td>
-<td align="center">232869</td>
-<td align="center">0.02</td>
-<td align="center">0.56</td>
+<td align="center">42215</td>
 <td align="center">0.10</td>
+<td align="center">3.10</td>
+<td align="center">0.36</td>
 </tr>
 <tr>
 <td align="center">1024</td>
 <td align="center">4</td>
-<td align="center">229851</td>
-<td align="center">0.02</td>
-<td align="center">0.57</td>
-<td align="center">0.11</td>
+<td align="center">25787</td>
+<td align="center">0.16</td>
+<td align="center">5.08</td>
+<td align="center">0.77</td>
 </tr>
 <tr>
 <td align="center">2048</td>
 <td align="center">2</td>
-<td align="center"><b>192329</b></td>
-<td align="center">0.02</td>
-<td align="center">0.68</td>
-<td align="center">0.15</td>
+<td align="center"><b>23772</b></td>
+<td align="center">0.17</td>
+<td align="center">5.51</td>
+<td align="center">1.15</td>
 </tr>
 </tbody>
 </table>
@@ -371,72 +373,72 @@ The buffer is 248 KB. A tile that fits is one launch. A tile that does not fit i
 <tr>
 <td align="center">N=4096, K=8</td>
 <td align="center">1</td>
-<td align="center"><b>9189</b></td>
-<td align="center">0.45</td>
-<td align="center">3.57</td>
-<td align="center">0.54</td>
-<td align="center">13143</td>
-<td align="center">−3954</td>
+<td align="center"><b>2232</b></td>
+<td align="center">1.84</td>
+<td align="center">14.68</td>
+<td align="center">1.50</td>
+<td align="center">17207</td>
+<td align="center">−14975</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=16</td>
 <td align="center">1</td>
-<td align="center"><b>33802</b></td>
-<td align="center">0.12</td>
-<td align="center">1.94</td>
-<td align="center">0.28</td>
-<td align="center">40304</td>
-<td align="center">−6502</td>
+<td align="center"><b>4088</b></td>
+<td align="center">1.00</td>
+<td align="center">16.03</td>
+<td align="center">1.57</td>
+<td align="center">30993</td>
+<td align="center">−26905</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=32</td>
 <td align="center">2</td>
-<td align="center"><b>132303</b></td>
-<td align="center">0.03</td>
-<td align="center">0.99</td>
-<td align="center">0.16</td>
-<td align="center">234340</td>
-<td align="center">−102037</td>
+<td align="center"><b>10218</b></td>
+<td align="center">0.40</td>
+<td align="center">12.83</td>
+<td align="center">1.44</td>
+<td align="center">61100</td>
+<td align="center">−50882</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=64</td>
 <td align="center">4</td>
-<td align="center"><b>265690</b></td>
-<td align="center">0.02</td>
-<td align="center">0.99</td>
-<td align="center">0.19</td>
-<td align="center">577735</td>
-<td align="center">−312045</td>
+<td align="center"><b>28738</b></td>
+<td align="center">0.14</td>
+<td align="center">9.12</td>
+<td align="center">1.30</td>
+<td align="center">121460</td>
+<td align="center">−92722</td>
 </tr>
 <tr>
 <td align="center">N=512, K=128</td>
 <td align="center">1</td>
-<td align="center"><b>66724</b></td>
-<td align="center">0.008</td>
-<td align="center">0.98</td>
-<td align="center">0.23</td>
-<td align="center">75455</td>
-<td align="center">−8731</td>
+<td align="center"><b>11699</b></td>
+<td align="center">0.044</td>
+<td align="center">5.60</td>
+<td align="center">1.15</td>
+<td align="center">80067</td>
+<td align="center">−68368</td>
 </tr>
 <tr>
 <td align="center">N=1024, K=128</td>
 <td align="center">2</td>
-<td align="center"><b>133802</b></td>
-<td align="center">0.008</td>
-<td align="center">0.98</td>
-<td align="center">0.23</td>
-<td align="center">155646</td>
-<td align="center">−21844</td>
+<td align="center"><b>22635</b></td>
+<td align="center">0.045</td>
+<td align="center">5.79</td>
+<td align="center">1.19</td>
+<td align="center">82842</td>
+<td align="center">−60207</td>
 </tr>
 <tr>
 <td align="center">N=2048, K=128</td>
 <td align="center">4</td>
-<td align="center"><b>267071</b></td>
-<td align="center">0.008</td>
-<td align="center">0.98</td>
-<td align="center">0.23</td>
-<td align="center">570802</td>
-<td align="center">−303731</td>
+<td align="center"><b>47078</b></td>
+<td align="center">0.044</td>
+<td align="center">5.57</td>
+<td align="center">1.14</td>
+<td align="center">86750</td>
+<td align="center">−39672</td>
 </tr>
 </tbody>
 </table>
@@ -445,7 +447,7 @@ The buffer VF is lower than the GM VF on every row. `LDK` and `STK` are 0. The o
 
 ### 4.4 Operation breakdown
 
-`N = 4096`, `K = 32`, 256 threads, the buffer run. Two launches. VF is the sum, 132303. The copy into the buffer sits outside this window.
+`N = 4096`, `K = 32`, 256 threads, the buffer run. Two launches. VF is the sum, 10218. The copy into the buffer sits outside this window.
 
 **Whole kernel.** el/cyc is output elements per cycle, `N / VF`, over both launches.
 
@@ -464,10 +466,10 @@ The buffer VF is lower than the GM VF on every row. `LDK` and `STK` are 0. The o
 </thead>
 <tbody>
 <tr>
-<td align="center">132303</td>
-<td align="center">0.03</td>
-<td align="center">0.16</td>
-<td align="center">4608 LDS, 4608 F2F, 4096 FFMA, 64 STS</td>
+<td align="center">10218</td>
+<td align="center">0.40</td>
+<td align="center">1.44</td>
+<td align="center">2560 LDS, 2560 F2F, 4096 FFMA, 64 STS</td>
 </tr>
 </tbody>
 </table>
@@ -487,25 +489,25 @@ The buffer VF is lower than the GM VF on every row. `LDK` and `STK` are 0. The o
 <tr>
 <td align="center">LDS</td>
 <td align="center">input bytes</td>
-<td align="center">6622–71870<br>74698–139848</td>
-<td align="center">2.01</td>
+<td align="center">6605–11144<br>13776–18375</td>
+<td align="center">28.69</td>
 </tr>
 <tr>
 <td align="center">F2F</td>
 <td align="center">input elements of A</td>
-<td align="center">6689–72468<br>75025–140543</td>
-<td align="center">1.00</td>
+<td align="center">6658–11181<br>13806–18430</td>
+<td align="center">14.33</td>
 </tr>
 <tr>
 <td align="center">FFMA</td>
 <td align="center">products</td>
-<td align="center">7300–72475<br>75923–140550</td>
-<td align="center">1.01</td>
+<td align="center">6666–11207<br>13833–18456</td>
+<td align="center">14.30</td>
 </tr>
 <tr>
 <td align="center">STS</td>
 <td align="center">output bytes</td>
-<td align="center">72522–72640<br>140597–140715</td>
+<td align="center">11260–11378<br>18509–18627</td>
 <td align="center">69.42</td>
 </tr>
 </tbody>
@@ -513,11 +515,9 @@ The buffer VF is lower than the GM VF on every row. `LDK` and `STK` are 0. The o
 
 `LDS`, `F2F`, and `FFMA` cover the same stretch of each launch. The multiply does not add a separate pass. `STS` is 118 cycles at the end of each launch.
 
-The `LDS` window is the VF. Each launch issues 2304 loads. The next load follows on a median gap of 32 cycles. From the first issue to the last completion the two launches take 65821 and 65820 cycles, 131641 together, inside the VF of 132303. The 262208 input bytes over the issue span of 130398 cycles are the 2.01 bytes per cycle in Table 8. The 128 B/cycle line for those bytes is 2048.5 cycles, and 85% of that line is 2410 cycles.
+Each launch issues 1280 `LDS` and 1280 `F2F`. The two issue spans are 4539 and 4599 cycles for `LDS`, 9138 together. The 262208 input bytes over that span are the 28.69 bytes per cycle in Table 8. The first load is 70 and 87 cycles after each VF starts. A load stays active for 27–30 cycles.
 
-The other 662 cycles sit outside that load window. The head, 90 and 108 cycles, is address math before the first load. The tail, 232 cycles in each launch, is the last `F2F` and `FFMA`, a block barrier, the store addresses, and 32 `STS`. The shortest load is active for 27 and 30 cycles. The median active time is 652, queue time behind loads already issued.
-
-The single-op programs are the 32-float runs at 256 threads. `LDS` stays active for 29 cycles and moves 83.17 bytes per cycle. `FADD` stays active for 8 cycles, 9.14 elements per cycle. `FFMA` stays active for 11 cycles, 11.36 products per cycle. `STS` stays active for 20 cycles, 65.93 bytes per cycle. The `F2F` row uses the `FADD` program. Case rates still use the Table 8 spans.
+The single-op programs are the 32-float runs at 256 threads, and those programs were not rerun with this library. `LDS` stays active for 29 cycles and moves 83.17 bytes per cycle. `FADD` stays active for 8 cycles, 9.14 elements per cycle. `FFMA` stays active for 11 cycles, 11.36 products per cycle. `STS` stays active for 20 cycles, 65.93 bytes per cycle. The `F2F` row uses the `FADD` program. Case rates still use the Table 8 spans.
 
 **Table 9.** Single-op check against the buffer kernel. `N = 4096`, `K = 32`, 256 threads.
 
@@ -539,11 +539,11 @@ The single-op programs are the 32-float runs at 256 threads. `LDS` stays active 
 <td align="center">LDS</td>
 <td align="center">29</td>
 <td align="center">27</td>
-<td align="center">634.5</td>
-<td align="center">714</td>
+<td align="center">27.6</td>
+<td align="center">30</td>
 <td align="center">input B/cycle</td>
 <td align="center">83.17</td>
-<td align="center">2.01</td>
+<td align="center">28.69</td>
 </tr>
 <tr>
 <td align="center">F2F</td>
@@ -553,17 +553,17 @@ The single-op programs are the 32-float runs at 256 threads. `LDS` stays active 
 <td align="center">8</td>
 <td align="center">elements/cycle</td>
 <td align="center">9.14</td>
-<td align="center">1.00</td>
+<td align="center">14.33</td>
 </tr>
 <tr>
 <td align="center">FFMA</td>
 <td align="center">11</td>
 <td align="center">11</td>
-<td align="center">11.0</td>
-<td align="center">11</td>
+<td align="center">11.5</td>
+<td align="center">12</td>
 <td align="center">products/cycle</td>
 <td align="center">11.36</td>
-<td align="center">1.01</td>
+<td align="center">14.30</td>
 </tr>
 <tr>
 <td align="center">STS</td>
@@ -578,7 +578,7 @@ The single-op programs are the 32-float runs at 256 threads. `LDS` stays active 
 </tbody>
 </table>
 
-`F2F` and `FFMA` match the single-op time on every issue. The low `LDS` is still 27. The average is 634.5, and the load moves 2.01 input bytes per cycle. The 32-float `LDS` program at 256 threads moves 83.17 bytes per cycle, and 85% of the 128 byte line is 108.8. `STS` runs from 23 to 31, average 28.6. The case store is 8 bytes per lane, and that burst moves 69.42 output bytes per cycle.
+`F2F` is 8 cycles on every issue. `FFMA` is 11 or 12. `LDS` stays active for 27–30 cycles, average 27.6, and the load moves 28.69 input bytes per cycle. The 32-float `LDS` program at 256 threads moves 83.17 bytes per cycle. `STS` runs from 23 to 31, average 28.6. The case store is 8 bytes per lane, and that burst moves 69.42 output bytes per cycle.
 
 ## 5. Running IPC
 
@@ -594,9 +594,9 @@ Two slabs, placed end to end. The sum is VF 20688. `VCPADD` issues 10240 times. 
 
 ### 5.2 SIMT
 
-The buffer run, 256 threads. Two launches, and the sum is VF 132303. `LDS` and `F2F` issue 4608 times. `FFMA` issues 4096 times. `STS` issues 64 times, at the end of each launch. The line stays under 1, with a short spike near 2 at the start of each launch. The scalar IPC is 0.16.
+The buffer run, 256 threads. Two launches, and the sum is VF 10218. `LDS` and `F2F` issue 2560 times. `FFMA` issues 4096 times. `STS` issues 64 times, at the end of each launch. The scalar IPC is 1.44.
 
-**Figure 3.** Buffer SIMT instructions. `N = 4096`, `K = 32`, 256 threads. VF 132303.
+**Figure 3.** Buffer SIMT instructions. `N = 4096`, `K = 32`, 256 threads. VF 10218.
 
 ![Buffer SIMT instructions, N = 4096, K = 32](plots/simt_first_launch.png)
 
@@ -606,7 +606,7 @@ The buffer run, 256 threads. Two launches, and the sum is VF 132303. `LDS` and `
 
 ### 6.1 SIMT
 
-Source `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Each warp owns 256 outputs. Lane `L` loads `A[n, L]`. The buffer kernel uses `threadIdx.x * 64 + k`, so adjacent threads are 128 bytes apart.
+Source `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Each warp owns 256 outputs. Lane `L` loads `A[L, n]`. The buffer kernel loads a `half2` at `threadIdx.x * 2`, so adjacent threads are 4 bytes apart.
 
 **Table 10.** CCE against the buffer kernel. `N = 4096`, `K = 32`, 256 threads.
 
@@ -623,14 +623,14 @@ Source `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Each warp owns 256 outputs. La
 <tbody>
 <tr>
 <td align="center">Buffer</td>
-<td align="center">132303</td>
-<td align="center">0.03</td>
-<td align="center">0.99</td>
-<td align="center">0.16</td>
+<td align="center"><b>10218</b></td>
+<td align="center">0.40</td>
+<td align="center">12.83</td>
+<td align="center">1.44</td>
 </tr>
 <tr>
 <td align="center">CCE</td>
-<td align="center"><b>55100</b></td>
+<td align="center">55100</td>
 <td align="center">0.07</td>
 <td align="center">2.38</td>
 <td align="center">1.12</td>
@@ -638,7 +638,7 @@ Source `benches/sv3/cce/gemv_n4096_k32_t256.asc`. Each warp owns 256 outputs. La
 </tbody>
 </table>
 
-The buffer window is 2.40× the CCE window. Buffer `LDS` issues every 32 cycles, median active time 652. CCE `LDS` issues every 13 cycles and finishes in 27. CCE uses `FMUL` and `REDUX` in place of `FFMA`.
+The CCE window is 5.39× the buffer window. Buffer `LDS` stays active for 27–30 cycles. CCE `LDS` issues every 13 cycles and finishes in 27. CCE uses `FMUL` and `REDUX` in place of `FFMA`. The CCE row was not rerun; it is the hand-written kernel.
 
 **Figure 4.** Buffer instructions, first launch, first 2000 ticks. `N = 4096`, `K = 32`, 256 threads.
 
@@ -650,7 +650,7 @@ The buffer window is 2.40× the CCE window. Buffer `LDS` issues every 32 cycles,
 
 ## 7. Conclusion
 
-SIMD is the lower VF on every row. Bold is that VF.
+Bold is the lower VF. On the `N = 4096` rows the buffer SIMT is shorter. On the `K = 128` rows SIMD is shorter.
 
 **Table 11.** Head-to-head. Buffer SIMT, 256 threads, against SIMD.
 
@@ -667,57 +667,57 @@ SIMD is the lower VF on every row. Bold is that VF.
 <tbody>
 <tr>
 <td align="center">N=4096, K=8</td>
-<td align="center">9189</td>
-<td align="center"><b>3669</b></td>
-<td align="center">5520</td>
-<td align="center">2.50</td>
+<td align="center"><b>2232</b></td>
+<td align="center">3669</td>
+<td align="center">−1437</td>
+<td align="center">0.61</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=16</td>
-<td align="center">33802</td>
-<td align="center"><b>9313</b></td>
-<td align="center">24489</td>
-<td align="center">3.63</td>
+<td align="center"><b>4088</b></td>
+<td align="center">9313</td>
+<td align="center">−5225</td>
+<td align="center">0.44</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=32</td>
-<td align="center">132303</td>
-<td align="center"><b>20688</b></td>
-<td align="center">111615</td>
-<td align="center">6.40</td>
+<td align="center"><b>10218</b></td>
+<td align="center">20688</td>
+<td align="center">−10470</td>
+<td align="center">0.49</td>
 </tr>
 <tr>
 <td align="center">N=4096, K=64</td>
-<td align="center">265690</td>
-<td align="center"><b>45528</b></td>
-<td align="center">220162</td>
-<td align="center">5.84</td>
+<td align="center"><b>28738</b></td>
+<td align="center">45528</td>
+<td align="center">−16790</td>
+<td align="center">0.63</td>
 </tr>
 <tr>
 <td align="center">N=512, K=128</td>
-<td align="center">66724</td>
+<td align="center">11699</td>
 <td align="center"><b>9859</b></td>
-<td align="center">56865</td>
-<td align="center">6.77</td>
+<td align="center">1840</td>
+<td align="center">1.19</td>
 </tr>
 <tr>
 <td align="center">N=1024, K=128</td>
-<td align="center">133802</td>
+<td align="center">22635</td>
 <td align="center"><b>19718</b></td>
-<td align="center">114084</td>
-<td align="center">6.79</td>
+<td align="center">2917</td>
+<td align="center">1.15</td>
 </tr>
 <tr>
 <td align="center">N=2048, K=128</td>
-<td align="center">267071</td>
+<td align="center">47078</td>
 <td align="center"><b>39436</b></td>
-<td align="center">227635</td>
-<td align="center">6.77</td>
+<td align="center">7642</td>
+<td align="center">1.19</td>
 </tr>
 </tbody>
 </table>
 
-Δ VF is the SIMT VF minus the SIMD VF. SIMT/SIMD is the VF ratio. SIMD is shorter on every row.
+Δ VF is the SIMT VF minus the SIMD VF. SIMT/SIMD is the VF ratio. The buffer SIMT is shorter on every `N = 4096` row. SIMD is shorter on every `K = 128` row.
 
 ## Appendix
 

@@ -1,0 +1,21 @@
+== a_row_t256
+PASS maxabs=0.000e+00 kind=pack1 threads=256
+== a_row_t512
+PASS maxabs=0.000e+00 kind=pack1 threads=512
+== a_trans_t256
+PASS maxabs=0.000e+00 kind=pack2 threads=256
+== a_trans_t512
+PASS maxabs=0.000e+00 kind=pack2 threads=512
+== a_flat_t256
+PASS maxabs=0.000e+00 kind=pack0 threads=256
+
+# A results: same 16 KB slab, same 128×LDS.b32 issues, 3 layouts
+# row   = row-major u32 (lane stride 16 B)  — what build_ub_quad_acc emits today
+# trans = transposed u32 (tid + i*T)       — pure-bench conflict-free shape
+# flat  = per-thread contiguous            — bank-conflict control
+# format: tag PASS issues busy B/cyc
+a_row_t256 issues=128 busy=558 B/cyc=29.36
+a_row_t512 issues=128 busy=621 B/cyc=26.38
+a_trans_t256 issues=128 busy=205 B/cyc=79.92
+a_trans_t512 issues=128 busy=265 B/cyc=61.83
+a_flat_t256 issues=128 busy=2096 B/cyc=7.82

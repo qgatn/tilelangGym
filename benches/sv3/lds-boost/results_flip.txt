@@ -1,0 +1,15 @@
+== v0_base-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=5376 el/cyc=0.38 mac/cyc=3.05 IPC=0.73 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=3641 LDS_issues=192 LDS_busy=2004 LDS_B/cyc=8.18
+VF[1] span=1735 LDS_issues=192 LDS_busy=1212 LDS_B/cyc=13.52
+== v1_burst-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=8279 el/cyc=0.25 mac/cyc=1.98 IPC=0.43 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=6820 LDS_issues=192 LDS_busy=301 LDS_B/cyc=54.43
+VF[1] span=1459 LDS_issues=192 LDS_busy=257 LDS_B/cyc=63.75
+== v2_pair-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=4249 el/cyc=0.48 mac/cyc=3.86 IPC=0.92 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=2653 LDS_issues=192 LDS_busy=1119 LDS_B/cyc=14.64
+VF[1] span=1596 LDS_issues=192 LDS_busy=1031 LDS_B/cyc=15.89

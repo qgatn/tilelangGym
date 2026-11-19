@@ -1,0 +1,5 @@
+== v3_row-n2048-k8-t256
+PASS maxabs=1.192e-07
+launches=2 VF=4324 el/cyc=0.47 mac/cyc=3.79 IPC=0.91 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
+VF[0] span=2717 LDS_issues=192 LDS_busy=986 LDS_B/cyc=16.62
+VF[1] span=1607 LDS_issues=192 LDS_busy=582 LDS_B/cyc=28.15

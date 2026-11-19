@@ -12,14 +12,16 @@
 ## 1. Kernel Flow
 
 ```text
-GM ──MTE2──> UB  (A fp16, x fp16)          # outside the VF window
+GM ──MTE2──> UB  (A[k, n] fp16, x[k] fp16)   # outside the VF window
 VF:
-  LDS    fp16      : read A and x from UB
-  F2F    fp16→fp32 : convert (x re-converted per thread in base)
-  FFMA   fp32      : acc += (float)a * (float)xk
+  LDS    fp16      : read column n of A, and x, from UB
+  F2F    fp16→fp32 : convert
+  FFMA   fp32      : acc += (float)A[k, n] * (float)x[k]
   STS    fp32      : write accumulators to out_ub
-UB ──MTE3──> GM  (Out fp32)                 # outside the VF window
+UB ──MTE3──> GM  (Out fp32)
 ```
+
+`Out[n] = sum_k A[k, n] * x[k]`. `n` is the contiguous index.
 
 **Table 1. Operator dtypes and bytes per warp issue.**
 
@@ -64,9 +66,24 @@ UB ──MTE3──> GM  (Out fp32)                 # outside the VF window
 
 ## 3. Case Implementation
 
-- Same shape for all: `N = 2048`, `K = 8`, 256 threads.
+- Same shape for all: `N = 2048`, `K = 8`, 256 threads. `A` is `(K, N)`.
 - Effective rates = unique work ÷ opcode busy-union on **VF[1]** (tables scale busy ×2 so work columns stay full `N=2048`).
-- Full-case VF = `2 × span(VF[1])`. Charts: opcode IPC + warp IPC (2nd VF; base = only VF).
+- Full-case VF = `2 × span(VF[1])` when there are two launches. Base has one VF.
+- Charts: **Instr IPC focused on LDS** (`charts/web`, `node render.js instr LDS`) and **Warp IPC**. The pictures in this section are those two, saved under the existing figure names.
+
+**Table 3a. Rerun on `A[k, n]` after the 2026-11-17 TileLang update.** All `PASS`. Load band is A bytes of one slab (16384) ÷ LDS busy on that VF.
+
+| Schedule | Launches | VF sum | el/cyc | VF used | span | LDS B/cyc |
+|---|---:|---:|---:|---|---:|---:|
+| Base | 1 | 1501 | 1.36 | VF[0] | 1501 | 13.92 |
+| Op-matched | 2 | 3023 | 0.68 | VF[1] | 1234 | 23.64 |
+| Serial | 2 | 1508 | 1.36 | VF[1] | 738 | 47.49 |
+| Warp-pipeline | 2 | 2462 | 0.83 | VF[1] | 1163 | 35.16 |
+| Double-buffer | 2 | 2884 | 0.71 | VF[1] | 1154 | 29.68 |
+| Quad-buffer | 2 | 2190 | 0.94 | VF[1] | 736 | 45.64 |
+| Quad-acc | 2 | 1370 | 1.49 | VF[1] | 666 | 40.76 |
+
+The operator tables later in this section are the previous `A[n, k]` busy-union breakdown. The spans and the figures are this rerun.
 
 ### 3.1 Base
 
@@ -80,9 +97,9 @@ UB ──MTE3──> GM  (Out fp32)                 # outside the VF window
 | FFMA Schedule 3 ~21 el/cyc | Multiply after each convert |
 | Coalesced STS burst | 32 stores, busy union 364 |
 
-![Figure 1. Base case, ub-n2048-k8-t256](plots/case_ub_k8.png)
+![Figure 1. Base, Instr IPC focused on LDS](plots/case_ub_k8.png)
 
-![Figure 1b. Base warps](plots/case_ub_k8_warps.png)
+![Figure 1b. Base, Warp IPC](plots/case_ub_k8_warps.png)
 
 - Address adds track narrow loads; holes between load groups are the per-element `F2F→FFMA→STS` chain.
 - First `LDS` ~90 cycles after VF start (pointer setup).
@@ -109,9 +126,9 @@ Still not theory:
 - `A` stays scalar (64 B `LDS`/el); packed LDS does not appear.
 - **128 spill pairs** (`LDK`+`STK`) from `acc[4]`+`xf[8]`.
 
-![Figure 2. Op-matched, methodo-n2048-k8-t256](plots/methodo_ub_k8.png)
+![Figure 2. Op-matched, Instr IPC focused on LDS](plots/methodo_ub_k8.png)
 
-![Figure 2b. Op-matched warps (2nd VF)](plots/methodo_ub_k8_warps.png)
+![Figure 2b. Op-matched, Warp IPC](plots/methodo_ub_k8_warps.png)
 
 - Issue counts match base (576 / 576 / 512 / 32).
 - STS wins (packed `float2`, busy 364 → 166); spills still make VF slower than base.
@@ -133,9 +150,9 @@ Still not theory:
 - Two slabs; **2nd-VF span 1472** → full-case **2944**, IPC 0.57, `PASS`, **no spills**.
 - **I-cache / first-launch:** VF[0] 1488 vs VF[1] 1472 — small cold delta here; still quote VF[1].
 
-![Figure 3. Serial schedule, serial-n2048-k8-t256](plots/serial_ub_k8.png)
+![Figure 3. Serial, Instr IPC focused on LDS](plots/serial_ub_k8.png)
 
-![Figure 3b. Serial warps (2nd VF)](plots/serial_ub_k8_warps.png)
+![Figure 3b. Serial, Warp IPC](plots/serial_ub_k8_warps.png)
 
 0-IPC stretches (structural, not cold I-cache):
 
@@ -173,9 +190,9 @@ Other notes:
 - Faster than serial (2664 vs 2944) — **1.86×** theory vs serial’s 2.06×.
 - **I-cache / first-launch:** VF[0] 1398 vs VF[1] 1332; rates from VF[1].
 
-![Figure 4. Warp-pipeline, warp_pipe-n2048-k8-t256](plots/warp_pipe_ub_k8.png)
+![Figure 4. Warp-pipeline, Instr IPC focused on LDS](plots/warp_pipe_ub_k8.png)
 
-![Figure 4b. Warp-pipeline warps (2nd VF)](plots/warp_pipe_ub_k8_warps.png)
+![Figure 4b. Warp-pipeline, Warp IPC](plots/warp_pipe_ub_k8_warps.png)
 
 - Stages repeat per strip (4 strips × 2 launches).
 - LDS effective **24.22 B/cyc** (vs serial 15.12) — strip convert/multiply shortens the whole-slab drain.
@@ -206,9 +223,9 @@ Other notes:
 - Fastest TileLang schedule at the time (beats warp-pipe 2664 and serial 2944); quad-buffer (§3.6) and quad-acc (§3.7) improve further.
 - **I-cache / first-launch:** VF[0] 1617 / post-`END` **~547** vs VF[1] 1070 / post-last **22**. Confirmed with `dbl_buf_twice` (1st 1646 / 582; 2nd+ 1070 / 22). **Rates and charts use VF[1].**
 
-![Figure 5. Double-buffered strip pipeline, dbl_buf-n2048-k8-t256](plots/dbl_buf_ub_k8.png)
+![Figure 5. Double-buffer, Instr IPC focused on LDS](plots/dbl_buf_ub_k8.png)
 
-![Figure 5b. Double-buffer warps (2nd VF)](plots/dbl_buf_ub_k8_warps.png)
+![Figure 5b. Double-buffer, Warp IPC](plots/dbl_buf_ub_k8_warps.png)
 
 Two kinds of IPC = 0:
 
@@ -235,9 +252,9 @@ Two kinds of IPC = 0:
 - Two slabs; **2nd-VF span 958** → full-case **1916**, IPC **0.71**, `PASS`, no spills.
 - **I-cache / first-launch:** VF[0] 1512 / post-last-issue tail **560** vs VF[1] 958 / tail **22** — same cold-tax pattern as dbl-buf. **Rates and charts use VF[1].**
 
-![Figure 6. Quad-buffered strip pipeline, dbl_buf_quad-n2048-k8-t256](plots/dbl_buf_quad_ub_k8.png)
+![Figure 6. Quad-buffer, Instr IPC focused on LDS](plots/dbl_buf_quad_ub_k8.png)
 
-![Figure 6b. Quad-buffer warps (2nd VF)](plots/dbl_buf_quad_ub_k8_warps.png)
+![Figure 6b. Quad-buffer, Warp IPC](plots/dbl_buf_quad_ub_k8_warps.png)
 
 - The LDS band is one merged burst (~40–500); the dbl-buf holes are gone — that is the −10.5%.
 - The band's mid-issue rate stays ~0.25 LDS/cyc with ~98-tick latencies: row-per-thread loads stride lanes **16 B** apart, ~4× UB bank replay. More prefetch cannot fix that; it needs a relayout (`schedules/results/lds_improve.txt`).
@@ -269,11 +286,11 @@ Two kinds of IPC = 0:
 - Two slabs; **2nd-VF span 850** → full-case **1700**, IPC **1.05**, `PASS`, no spills.
 - **I-cache / first-launch:** VF[0] **853** / tail **22** vs VF[1] **850** / tail **22** — cold tax essentially gone (stock quad: VF[0] 1512 / tail 560). Straight-line code is the reason. **Rates and charts use VF[1]** (same convention).
 
-![Figure 7. Quad-acc (ILP chains), quad_acc-n2048-k8-t256-nosync](plots/quad_acc_ub_k8.png)
+![Figure 7. Quad-acc, Instr IPC focused on LDS](plots/quad_acc_ub_k8.png)
 
-![Figure 7b. Quad-acc warps (2nd VF)](plots/quad_acc_ub_k8_warps.png)
+![Figure 7b. Quad-acc, Warp IPC](plots/quad_acc_ub_k8_warps.png)
 
-- LDS band still ~[40–520] at ~28.5 B/cyc — same 16-B lane-stride bank-replay floor as §3.6; ILP does not raise LDS.
+- LDS band on this quad-acc is ~[40–520] at ~28.5 B/cyc — the `A[n, k]` 16 B lane stride. ILP does not raise it. The `A[k, n]` schedules (V1 63.75 B/cyc load band, V3 0.47 el/cyc) are in [`../lds-boost/lds_performance.md`](../lds-boost/lds_performance.md). CCE on the same slab: 16 B stride 29.36, 4 B stride 79.92 (`../lds-boost/RESULTS.md`).
 - F2F/FFMA effective rates look lower than stock quad because their busy unions stretch across the LDS trickle (overlap), not because less work issues.
 - Vs barrier-free stock quad (VF[1] 839 → 1678 est.): steady VF is **+11** (850 vs 839); the published win is the collapsed cold VF and the 2-slab launch wall (actual sum **1703** vs stock-quad-nosync **1935**).
 

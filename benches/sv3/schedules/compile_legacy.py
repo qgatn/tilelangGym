@@ -1,6 +1,8 @@
-"""Compile one contiguous-K kernel. Usage: compile.py thread|ub|warp|simd N K [threads]"""
+"""Compile one ANALYSIS kernel. Usage: compile_legacy.py thread|ub|warp|simd N K [threads]"""
 
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,7 +16,26 @@ from kernels_legacy import build_simd, build_thread, build_thread_ub, build_warp
 
 HERE = Path(__file__).resolve().parent
 BUILDERS = {"thread": build_thread, "ub": build_thread_ub, "warp": build_warp, "simd": build_simd}
-FIX = str(HERE.parents[2] / "bisheng_libstdcxx_clang_fix.h")
+SRC = "/home/onasismelchiorjeyakumar/workspace/tilelang/src"
+
+
+def _host_wrapper(smem: int) -> str:
+    return f"""
+
+#ifdef _WIN32
+#define TL_EXPORT __declspec(dllexport)
+#else
+#define TL_EXPORT
+#endif
+#define ERROR_BUF_SIZE 1024
+static char error_buf[ERROR_BUF_SIZE];
+extern "C" TL_EXPORT const char* get_last_error() {{ return error_buf; }}
+extern "C" TL_EXPORT int init() {{ error_buf[0] = '\\0'; return 0; }}
+extern "C" TL_EXPORT int call(void* A, void* X, void* Out, void* stream) {{
+  main_kernel<<<(1 * 1 * 1), {smem}, stream>>>((__gm__ half*)A, (__gm__ float*)Out, (__gm__ half*)X);
+  return 0;
+}}
+"""
 
 
 def main(argv=None) -> int:
@@ -33,16 +54,43 @@ def main(argv=None) -> int:
     out = HERE / "runs" / name
     out.mkdir(parents=True, exist_ok=True)
     kernel = BUILDERS[kind](N, K, threads) if threads is not None else BUILDERS[kind](N, K)
-    compiled = tilelang.compile(
-        kernel,
-        target="ascend",
-        out_idx=-1,
-        execution_backend="cython",
-        compile_flags=["-include", FIX, "-isystem", "/usr/include/c++/12"],
-        pass_configs={"tl.disable_data_race_check": True},
-    )
-    (out / "kernel.cpp").write_text(compiled.get_kernel_source())
-    shutil.copy(compiled.adapter.libpath, out / "kernel.so")
+    smem = None
+    try:
+        compiled = tilelang.compile(
+            kernel,
+            target="ascend",
+            out_idx=-1,
+            execution_backend="cython",
+            pass_configs={"tl.disable_data_race_check": True},
+        )
+        src = compiled.get_kernel_source()
+        (out / "kernel.cpp").write_text(src)
+        shutil.copy(compiled.adapter.libpath, out / "kernel.so")
+        print(f"OK {name}", flush=True)
+        return 0
+    except RuntimeError as e:
+        text = str(e)
+        marker = "#include <tl_templates/ascend/common.h>"
+        idx = text.find(marker)
+        if idx < 0:
+            raise
+        src = text[idx:].strip()
+        m = re.search(r"<<<\(1 \* 1 \* 1\),\s*(\d+),\s*stream>>>", text)
+        if m:
+            smem = int(m.group(1))
+    if smem is None:
+        smem = N * K * 2 + K * 2 + N * 4
+    (out / "kernel.cpp").write_text(src)
+    asc = out / "kernel.asc"
+    asc.write_text(src + _host_wrapper(smem))
+    cmd = [
+        "bisheng", "-O2", "-fPIC", "-std=c++20",
+        "-mllvm", "-cce-aicore-dcpreload-args=false",
+        "--npu-arch=dav-3510",
+        "-Wl,--no-mmap-output-file", "--shared",
+        str(asc), "-I", SRC, "-o", str(out / "kernel.so"),
+    ]
+    subprocess.run(cmd, check=True)
     print(f"OK {name}", flush=True)
     return 0
 
