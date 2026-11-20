@@ -1,0 +1,136 @@
+#include <tl_templates/ascend/common.h>
+#include <tl_templates/ascend/debug.h>
+__simt_vf__ __launch_bounds__(256) inline void main_kernel_simt_vf_0(__ubuf__ uint8_t* buf_dyn_shmem, int32_t s) {
+  float2 x2[4];
+  uint32_t wa0[4];
+  uint32_t wa1[4];
+  uint32_t wa2[4];
+  uint32_t wa3[4];
+  float2 pa0[4];
+  float2 pa1[4];
+  float2 pa2[4];
+  float2 pa3[4];
+  float a0x[1];
+  float a0y[1];
+  float a1x[1];
+  float a1y[1];
+  float a2x[1];
+  float a2y[1];
+  float a3x[1];
+  float a3y[1];
+  #pragma unroll
+  for (int32_t i = 0; i < 4; ++i) {
+    float2 _;
+      uint1 v_ = *(__ubuf__ uint1*)(((__ubuf__ half*)buf_dyn_shmem) + ((i * 2) + 12288));
+      ((float2*)(&_))[0] = __half22float2(((half2*)(&v_))[0]);
+    x2[i] = _;
+  }
+  #pragma unroll
+  for (int32_t i_1 = 0; i_1 < 4; ++i_1) {
+    wa0[i_1] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[((i_1 * 1024) + ((int32_t)threadIdx.x))];
+  }
+  #pragma unroll
+  for (int32_t i_2 = 0; i_2 < 4; ++i_2) {
+    wa1[i_2] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[(((i_2 * 1024) + ((int32_t)threadIdx.x)) + 256)];
+  }
+  #pragma unroll
+  for (int32_t i_3 = 0; i_3 < 4; ++i_3) {
+    wa2[i_3] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[(((i_3 * 1024) + ((int32_t)threadIdx.x)) + 512)];
+  }
+  #pragma unroll
+  for (int32_t i_4 = 0; i_4 < 4; ++i_4) {
+    wa3[i_4] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[(((i_4 * 1024) + ((int32_t)threadIdx.x)) + 768)];
+  }
+  #pragma unroll
+  for (int32_t i_5 = 0; i_5 < 4; ++i_5) {
+    float2 __1;
+        uint32_t v__1 = wa0[i_5];
+      uint1 v__2 = *(uint1 *)(&(v__1));
+      ((float2*)(&__1))[0] = __half22float2(((half2*)(&v__2))[0]);
+    pa0[i_5] = __1;
+  }
+  #pragma unroll
+  for (int32_t i_6 = 0; i_6 < 4; ++i_6) {
+    float2 __2;
+        uint32_t v__3 = wa1[i_6];
+      uint1 v__4 = *(uint1 *)(&(v__3));
+      ((float2*)(&__2))[0] = __half22float2(((half2*)(&v__4))[0]);
+    pa1[i_6] = __2;
+  }
+  #pragma unroll
+  for (int32_t i_7 = 0; i_7 < 4; ++i_7) {
+    float2 __3;
+        uint32_t v__5 = wa2[i_7];
+      uint1 v__6 = *(uint1 *)(&(v__5));
+      ((float2*)(&__3))[0] = __half22float2(((half2*)(&v__6))[0]);
+    pa2[i_7] = __3;
+  }
+  #pragma unroll
+  for (int32_t i_8 = 0; i_8 < 4; ++i_8) {
+    float2 __4;
+        uint32_t v__7 = wa3[i_8];
+      uint1 v__8 = *(uint1 *)(&(v__7));
+      ((float2*)(&__4))[0] = __half22float2(((half2*)(&v__8))[0]);
+    pa3[i_8] = __4;
+  }
+  a0x[0] = float(0x0p+0f/*0.000000e+00*/);
+  a0y[0] = float(0x0p+0f/*0.000000e+00*/);
+  a1x[0] = float(0x0p+0f/*0.000000e+00*/);
+  a1y[0] = float(0x0p+0f/*0.000000e+00*/);
+  a2x[0] = float(0x0p+0f/*0.000000e+00*/);
+  a2y[0] = float(0x0p+0f/*0.000000e+00*/);
+  a3x[0] = float(0x0p+0f/*0.000000e+00*/);
+  a3y[0] = float(0x0p+0f/*0.000000e+00*/);
+  for (int32_t c = 0; c < 4; ++c) {
+      float2 v__9 = pa0[c];
+      float2 v__10 = x2[c];
+    a0x[0] = (a0x[0] + (v__9.x * v__10.x));
+      float2 v__11 = pa0[c];
+      float2 v__12 = x2[c];
+    a0y[0] = (a0y[0] + (v__11.y * v__12.y));
+      float2 v__13 = pa1[c];
+      float2 v__14 = x2[c];
+    a1x[0] = (a1x[0] + (v__13.x * v__14.x));
+      float2 v__15 = pa1[c];
+      float2 v__16 = x2[c];
+    a1y[0] = (a1y[0] + (v__15.y * v__16.y));
+      float2 v__17 = pa2[c];
+      float2 v__18 = x2[c];
+    a2x[0] = (a2x[0] + (v__17.x * v__18.x));
+      float2 v__19 = pa2[c];
+      float2 v__20 = x2[c];
+    a2y[0] = (a2y[0] + (v__19.y * v__20.y));
+      float2 v__21 = pa3[c];
+      float2 v__22 = x2[c];
+    a3x[0] = (a3x[0] + (v__21.x * v__22.x));
+      float2 v__23 = pa3[c];
+      float2 v__24 = x2[c];
+    a3y[0] = (a3y[0] + (v__23.y * v__24.y));
+  }
+  ((__ubuf__ float*)buf_dyn_shmem)[(((s * 1024) + ((int32_t)threadIdx.x)) + 4096)] = (a0x[0] + a0y[0]);
+  ((__ubuf__ float*)buf_dyn_shmem)[(((s * 1024) + ((int32_t)threadIdx.x)) + 4352)] = (a1x[0] + a1y[0]);
+  ((__ubuf__ float*)buf_dyn_shmem)[(((s * 1024) + ((int32_t)threadIdx.x)) + 4608)] = (a2x[0] + a2y[0]);
+  ((__ubuf__ float*)buf_dyn_shmem)[(((s * 1024) + ((int32_t)threadIdx.x)) + 4864)] = (a3x[0] + a3y[0]);
+}
+
+extern "C" __global__ __vector__ void main_kernel(__gm__ uint32_t* A_t, __gm__ float* Out, __gm__ half* X) {
+  asc_init();
+  __ubuf__ uint8_t *buf_dyn_shmem = (__ubuf__ uint8_t *)0;
+  asc_sync_notify(PIPE_V, PIPE_MTE2, static_cast<event_t>(0));
+  asc_copy_gm2ub_align((__ubuf__ uint8_t*)((&(((__ubuf__ half*)buf_dyn_shmem)[12288]))), (__gm__ uint8_t*)((&(X[0]))), 1, 16, 0, 0, 0, static_cast<asc_load_l2_cache_mode>(0), 16, 16);
+  for (int32_t s = 0; s < 2; ++s) {
+    asc_sync_wait(PIPE_V, PIPE_MTE2, static_cast<event_t>(0));
+    asc_copy_gm2ub_align((__ubuf__ uint8_t*)((&(((__ubuf__ uint32_t*)buf_dyn_shmem)[0]))), (__gm__ uint8_t*)((&(A_t[(s * 1024)]))), 4, 4096, 0, 0, 0, static_cast<asc_load_l2_cache_mode>(0), 8192, 4096);
+    asc_sync_notify(PIPE_MTE2, PIPE_V, static_cast<event_t>(0));
+    asc_sync_wait(PIPE_MTE2, PIPE_V, static_cast<event_t>(0));
+    asc_vf_call<main_kernel_simt_vf_0>(cce::dim3(256), buf_dyn_shmem, s);
+    asc_sync_notify(PIPE_V, PIPE_MTE2, static_cast<event_t>(0));
+    if (s == 1) {
+      asc_sync_notify(PIPE_V, PIPE_MTE3, static_cast<event_t>(0));
+    }
+  }
+  asc_sync_wait(PIPE_V, PIPE_MTE3, static_cast<event_t>(0));
+  asc_copy_ub2gm_align((__gm__ uint8_t*)((&(Out[0]))), (__ubuf__ uint8_t*)((&(((__ubuf__ float*)buf_dyn_shmem)[4096]))), 1, 8192, static_cast<asc_store_l2_cache_mode>(4), 8192, 8192);
+  asc_sync_wait(PIPE_V, PIPE_MTE2, static_cast<event_t>(0));
+}
+

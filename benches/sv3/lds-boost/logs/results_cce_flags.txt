@@ -17,3 +17,6 @@ launches=2 VF=5315 el/cyc=0.39 mac/cyc=3.08 IPC=0.72 SIMT_LDK=512 SIMT_STK=512 R
 PASS maxabs=1.192e-07
 launches=2 VF=5461 el/cyc=0.38 mac/cyc=3.00 IPC=0.70 SIMT_LDK=512 SIMT_STK=512 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0
 DONE
+== v3_cce_f2 (float2 unpack)
+PASS maxabs=1.192e-07
+launches=2 VF=1906 el/cyc=1.07 mac/cyc=8.60 IPC=1.21 SIMT_LDK=0 SIMT_STK=0 RV_SLDI=0 RV_SSTI=0 RV_VMOV=0

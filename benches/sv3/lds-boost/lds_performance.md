@@ -15,7 +15,9 @@ Numbers are N=2048, K=8, 256 threads, rerun on the current TileLang (`562cbc7c`,
 7. [Spills](#7-spills) — V3's schedule, and why the spill clogs the band.
 8. [CCE V3](#8-cce-v3) — the same schedule written by hand, and the compiler knobs.
 9. [Theoretical registers vs what actually spills](#9-theoretical-registers-vs-what-actually-spills) — the register math, the trace-level proof, and the TileLang/CCE comparison.
-10. [Conclusion](#10-conclusion)
+10. [GB10 comparison](#10-gb10-comparison) — the same unpack on the GPU, in PTX and SASS.
+11. [CCE float2](#11-cce-float2) — the vector intrinsic on the NPU, and the fix it proves.
+12. [Conclusion](#12-conclusion)
 
 ## 1. Layout
 
@@ -35,7 +37,7 @@ bank:    0    1     2   ...  31
 
 CCE of this address, loads only, no FFMA (`79.92 B/cyc`):
 
-```36:43:work/ST-Analysis/SV3/lds-boost/cce/a_row8_pack.asc
+```36:43:benches/sv3/lds-boost/cce/a_row8_pack.asc
 #elif PACK == 2
   // Transposed UB: u32 index = tid + i*T (pure-bench shape, same kU32 loads).
   constexpr int kLoads = kU32 / kThreads;
@@ -76,7 +78,7 @@ Same math, same `A[k, n]` addresses. The difference is when FFMA runs. V2 also w
 
 V1 source: all loads, then all FFMAs.
 
-```124:142:work/ST-Analysis/SV3/lds-boost/src/kernels_flip.py
+```124:142:benches/sv3/lds-boost/src/kernels_flip.py
                     for q in T.serial(4):
                         for n, c in T.Parallel(threads, kh):
                             wa[q, n, c] = a_t_ub[c, q * threads + n]
@@ -100,7 +102,7 @@ V1 source: all loads, then all FFMAs.
 
 V3 source: one row is finished before the next load.
 
-```190:200:work/ST-Analysis/SV3/lds-boost/src/kernels_flip.py
+```190:200:benches/sv3/lds-boost/src/kernels_flip.py
                         for n, c in T.Parallel(threads, kh):
                             wa[n, c] = a_t_ub[c, q * threads + n]
                         for n, c in T.Parallel(threads, kh):
@@ -116,7 +118,7 @@ V3 source: one row is finished before the next load.
 
 Generated V1 load. Lane `t` and lane `t+1` are one word apart:
 
-```19:19:work/ST-Analysis/SV3/lds-boost/runs/v1_burst-n2048-k8-t256/kernel.cpp
+```19:19:benches/sv3/lds-boost/runs/v1_burst-n2048-k8-t256/kernel.cpp
       wa[((q * 4) + i_1)] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[(((i_1 * 1024) + (q * 256)) + ((int32_t)threadIdx.x))];
 ```
 
@@ -440,9 +442,45 @@ Extracted from the two traces (`instr.bin`, VF[1], first word unpack of row q). 
 - The spilled values are the 16-bit halves of each packed word — not `x`, not `wa`, not the accumulators.
 - The loads-only CCE, `cce/a_row8_pack.asc`, same addresses with no unpack, does not spill and scores **79.92 B/cyc**. The spill appears exactly when the packed word is split into two halves.
 
-## 10. Conclusion
+## 10. GB10 comparison
+
+The same GEMV, same packed layout, same two unpack spellings, written in CUDA and run on this machine's GB10 (`SV3/gpu/`, CUDA 13.1, sm_121). Source `gpu/gemv_fp16x2.cu`; outputs `gpu/out/` (`run.txt`, `gemv_fp16x2.ptx`, `gemv_fp16x2.sass`). Both arms pass at 1.19e-07.
+
+- The GPU unpacks entirely in registers — **for both spellings**, including the NPU's pun `*(half*)&lo16`. ncu reports `local_op_ld = 0`, `local_op_st = 0` on both kernels; the SASS contains no `STL`/`LDL`.
+- PTX never takes an address. The pun becomes `mov.b32 {_, %rs10}, %r36` — register-half selection — then `cvt.f32.f16`. The intrinsic arm is `mov.b32 {low,high}` + two `cvt.f32.f16`.
+- SASS is one instruction per half: `HADD2.F32 R31, -RZ, R10.H0_H0` widens the **low half of a packed register** to f32; `.H1_H1` is the high half. Then plain `FFMA`. The mask, the shift, and the pun all evaporate.
+- Where bisheng reads "you took an address" and inserts the stack round trip, nvcc reads "you want a half of a register" and emits a half selector on the convert. Same source, no memory. That is the entire difference.
+
+## 11. CCE float2
+
+The register-safe spelling also exists on the NPU. `half2` / `float2` are bisheng built-in vector types, and `__half22float2(half2) → float2` converts a packed pair in registers. TileLang's own codegen already emits exactly this for a vectorized `float16x2 → float32x2` cast (`codegen_ascend.cc`, `PrintVectorizedCast`).
+
+`cce/v3_row_f2.asc` is V3 with the union replaced by:
+
+```c
+float2 p = __half22float2(((half2*)&w)[0]);
+acc += p.x * x[2*c]  +  p.y * x[2*c+1];
+```
+
+- One F2F issue converts **both halves** of one packed word: the union kernel issues 320 F2F per VF (each half separately), this kernel issues 192 — 128 fewer, exactly one per word.
+- Passes at 1.19e-07. Trace `runs/v3_cce_f2-n2048-k8-t256/`, log line in `logs/results_cce_flags.txt`.
+
+| | TileLang V3 (pun) | CCE V3 (union) | **CCE V3 (float2)** |
+|---|---:|---:|---:|
+| STK / LDK per VF | 512 / 512 | 512 / 512 | **0 / 0** |
+| VF, ticks | 4424 | 5439 | **1906** |
+| el/cyc | 0.46 | 0.38 | **1.07** |
+| LDS band, B/cyc | 28.15 | — | **38.28** |
+| steady VF span | 1607 | 1623 | **849** |
+
+- Per word the schedule is now just `LDS → F2F → FFMA_I → FFMA`. No SHFI, no STK, no LDK.
+- This is section 6 item 1, measured: ask for a **conversion**, not an **address**, and the unpack stays in registers — same lesson the GB10 SASS shows natively.
+- 2.3× faster than TileLang V3 end to end, with identical addresses and identical math.
+
+## 12. Conclusion
 
 - The layout is right: 128 B/issue, one bank per lane, 79.92 B/cyc reachable in CCE.
 - V1 shows that load pattern at **63.75 B/cyc** — the banks are not the problem. But V1 is the slowest kernel (**0.24 el/cyc**): its band is a 257-tick burst followed by a ~1200-tick serial tail.
 - V3 is the better kernel (**0.46 el/cyc**) because compute follows each load instead of trailing all of them.
 - V3's 28.15 B/cyc band is not the memory system. Between row loads the pipe runs stack-only bins (~480 ticks per VF): 22 live registers spill to the stack 512 times because of the `*(half*)(&v_)` pun. Fix the lowering (section 6, item 1) and the same addresses have V1's 63.75 B/cyc behind them.
+- The fix is now measured, twice. The GB10 does the same unpack with zero local-memory traffic because its convert reads register halves (`HADD2.F32 .H0_H0`), and the CCE `float2` spelling (`__half22float2`, §11) removes the spill on the NPU outright: **0/0 STK/LDK, 0.46 → 1.07 el/cyc**. TileLang should lower the packed unpack to that intrinsic.
