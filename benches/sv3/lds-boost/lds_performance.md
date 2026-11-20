@@ -14,7 +14,7 @@ Numbers are N=2048, K=8, 256 threads, rerun on the current TileLang (`562cbc7c`,
 6. [How to get closer](#6-how-to-get-closer) — the levers, in order of payoff.
 7. [Spills](#7-spills) — V3's schedule, and why the spill clogs the band.
 8. [CCE V3](#8-cce-v3) — the same schedule written by hand, and the compiler knobs.
-9. [Theoretical registers](#9-theoretical-registers) — live bytes against TileLang V3 and CCE V3.
+9. [Theoretical registers vs what actually spills](#9-theoretical-registers-vs-what-actually-spills) — the register math, the trace-level proof, and the TileLang/CCE comparison.
 10. [Conclusion](#10-conclusion)
 
 ## 1. Layout
@@ -35,7 +35,7 @@ bank:    0    1     2   ...  31
 
 CCE of this address, loads only, no FFMA (`79.92 B/cyc`):
 
-```36:43:benches/sv3/lds-boost/cce/a_row8_pack.asc
+```36:43:work/ST-Analysis/SV3/lds-boost/cce/a_row8_pack.asc
 #elif PACK == 2
   // Transposed UB: u32 index = tid + i*T (pure-bench shape, same kU32 loads).
   constexpr int kLoads = kU32 / kThreads;
@@ -76,7 +76,7 @@ Same math, same `A[k, n]` addresses. The difference is when FFMA runs. V2 also w
 
 V1 source: all loads, then all FFMAs.
 
-```124:142:benches/sv3/lds-boost/src/kernels_flip.py
+```124:142:work/ST-Analysis/SV3/lds-boost/src/kernels_flip.py
                     for q in T.serial(4):
                         for n, c in T.Parallel(threads, kh):
                             wa[q, n, c] = a_t_ub[c, q * threads + n]
@@ -100,7 +100,7 @@ V1 source: all loads, then all FFMAs.
 
 V3 source: one row is finished before the next load.
 
-```190:200:benches/sv3/lds-boost/src/kernels_flip.py
+```190:200:work/ST-Analysis/SV3/lds-boost/src/kernels_flip.py
                         for n, c in T.Parallel(threads, kh):
                             wa[n, c] = a_t_ub[c, q * threads + n]
                         for n, c in T.Parallel(threads, kh):
@@ -116,7 +116,7 @@ V3 source: one row is finished before the next load.
 
 Generated V1 load. Lane `t` and lane `t+1` are one word apart:
 
-```19:19:benches/sv3/lds-boost/runs/v1_burst-n2048-k8-t256/kernel.cpp
+```19:19:work/ST-Analysis/SV3/lds-boost/runs/v1_burst-n2048-k8-t256/kernel.cpp
       wa[((q * 4) + i_1)] = ((__ubuf__ uint32_t*)buf_dyn_shmem)[(((i_1 * 1024) + (q * 256)) + ((int32_t)threadIdx.x))];
 ```
 
@@ -186,7 +186,8 @@ What will not move the needle: `--nosync` (measured, VF got worse), 512 threads 
 ## 7. Spills
 
 - Every schedule does 512 stack stores and 512 reloads per VF.
-- In V3 the eight stores per row are the eight `x` floats (`xfa[4]`, `xfb[4]`), spilled while `A` is unpacked, then reloaded for FFMA. In V1 the 16-word frame (`wa[16]`, `plo[16]`, `phi[16]`) is the cold-VF cost.
+- What is spilled is neither `x`, nor `wa`, nor the accumulators. Following the PC chain, each packed word produces exactly **2 STK + 2 LDK**: one pair per extracted half. Per word, `SHFI` computes `w >> 16`, one STK truncates the low 16 bits into a 2-byte slot, one STK stores the shifted high half, and two LDK read those slots back as `half`. Those are the `v_` / `v__1` intermediates of the pun, on their way to `plo`/`phi`. The x floats are converted once at the VF head and consumed by FFMA with no stack op between. That is 8 STK + 8 LDK per row, 8 warps × 4 rows = 256 each per VF.
+- Byte-wise: 2 B per lane, 32 lanes, 256 issues = 16 KB written + 16 KB read, **32 KB of stack traffic per VF** — more than the block's entire 22 KB live set (§9).
 - The live set that would have to fit is ~88 B per thread, 22 KB across 256 threads (§9). The spill is not that budget.
 
 - **Nothing we tried removes them:**
@@ -229,8 +230,8 @@ What will not move the needle: `--nosync` (measured, VF got worse), 512 threads 
 + 153   S2R ×8                                   row pointer setup
 + 154   F2F ×8                                   x halves → float
 + 199   LDS ×4  (+199 … +222)                    row q: 4 packed u32 words, 4 B/lane
-+ 236   STK ×8  (+236 … +369)  ← THE SPILL      x floats written to stack
-+ 252   LDK ×8                  ← THE RELOAD    x floats read back for FFMA
++ 236   STK ×8  (+236 … +369)  ← THE SPILL      the 8 halves of this row's 4 words
++ 252   LDK ×8                  ← THE RELOAD    those slots read back as half
 + 407   F2F + FFMA (+FFMA_I) ×8                  row q products
 + 501   STS ×1                                   out_ub store
 + 505   BRANCH                                   next row (q++)
@@ -302,11 +303,15 @@ The register and stack knobs, rebuilt on this CCE file, do not remove it. Every 
 - Pattern opts are the only one that moves the VF (5439 → 5315) and the count does not move.
 - The loads-only CCE, `cce/a_row8_pack.asc`, has no unpack and no stack and scores **79.92 B/cyc**. The spill appears when the packed word is turned into two halves.
 
-## 9. Theoretical registers
+## 9. Theoretical registers vs what actually spills
 
-Live values at one V3 row, after that row's four A loads have landed. One register is 4 B. At 256 threads the file is 256 × 128 × 4 B = **128 KB**, which is 512 B per thread.
+Two questions, two answers. First, how much data the kernel needs live (register math). Second, what the trace shows going to the stack (instruction-level, extracted from both logs). The second one is what proves TileLang and CCE hit the same lowering.
 
-**Table 7.** One thread.
+### 9.1 The budget: 128 KB of registers, 22 KB needed
+
+One register is 4 B. At 256 threads the file is 256 × 128 × 4 B = **128 KB**, i.e. 512 B per thread.
+
+**Table 7.** One thread of TileLang V3, at the spill point (row q, four A words loaded, first half converting).
 
 | Value | Count | Bytes | Registers | What it is |
 |---|---:|---:|---:|---|
@@ -328,25 +333,112 @@ Live values at one V3 row, after that row's four A loads have landed. One regist
 | loop / pointers | ~4 KB | 3.1% |
 | **All 256 threads** | **22 KB** | **17%** |
 
-- If each half takes its own register, one thread holds 104 B and all 256 threads hold **26 KB**, 20% of the file.
-- Nothing in that set needs the stack. 22 KB is the whole live footprint of the block.
+- If each half takes its own register: 104 B per thread, **26 KB** per block, 20% of the file.
+- The CCE spelling is leaner (`float x[8]`, one `w`, one union, one `acc`): ~56 B per thread, **~14 KB** per block.
+- Either way the block fits with 5–8× headroom. Nothing here forces a spill.
 
-**Table 9.** That live set against the two measured V3 kernels. The byte rows are the whole block (Table 8). The STK / LDK row is issues per VF, not bytes.
+### 9.2 What actually spills: the halves, not the 22 KB
+
+The idea: **the bits never needed to move — only their type did.** Two fp16 values of `A` share one 32-bit register. Pick real ones: `A[2c, n] = 0.5` is `0x3800` in fp16 bits, `A[2c+1, n] = 1.0` is `0x3C00`. The LDS brings the packed word in:
+
+```text
+R38 = w = 0x3C003800      ← one register holds BOTH numbers
+            │  │
+  high half    low half
+  = 0x3C00     = 0x3800
+  = 1.0        = 0.5      ← these bits ARE the fp16 encodings; nothing to compute
+```
+
+The kernel wants `acc += 0.5 * x_even + 1.0 * x_odd`. The ideal lowering is one instruction: copy the low 16 bits of `R38` into a register and call it a `half`. Register to register, no memory. What the source says instead is `plo = *(half *)(&v_)` (TileLang) or the union (CCE) — and taking the *address* of a value forces it into memory:
+
+```text
+register file                    stack (memory)
+─────────────                    ──────────────
+R38 = 0x3C003800
+   │
+   ├─ STK  low 2 B of R38 ────────►  slot0 = 0x3800      (the spill)
+   ├─ LDK  slot0 as half   ◄───────  R52(half) = 0.5     (the reload)
+   │
+   ├─ SHFI R40 = R38 >> 16          R40 = 0x00003C00    (high half must move down)
+   ├─ STK  low 2 B of R40 ────────►  slot1 = 0x3C00
+   └─ LDK  slot1 as half   ◄───────  R54(half) = 1.0
+
+then: F2F widens 0.5 and 1.0 to fp32, FFMA multiplies by xfa[c], xfb[c]
+```
+
+Read off the diagram:
+
+- `0x3800` was in `R38` the whole time. `slot0` and `slot1` are pure waystations — the same bits go out and come back so the compiler can re-name them from integer to `half`.
+- `& 0xFFFF` costs **no instruction**: STK stores only the low 2 bytes, so the store itself is the mask. Only the high half needs the SHFI, because a store takes the *low* bytes and `0x3C00` lives in the high ones.
+- The 9.3 encodings confirm the diagram: both STK instructions read the same registers (source nibble `38`/`40`) and write two slots 8 B apart.
+
+Per thread per row: 4 words × 2 halves = **8 STK + 8 LDK**. Per VF: ×4 rows ×8 warps = **256 + 256**, the 512/512 in every log.
+
+Traffic, per VF — every 2-byte half makes one 2-byte trip out and one back:
+
+```text
+1 STK issue  = 32 lanes × 2 B             =   64 B written
+256 issues   = 16 KB written + 16 KB read =  32 KB of stack traffic
+```
+
+One A slab — the actual payload — is 2048 outputs × 8 halves × 2 B = 16 KB. So: **stack traffic = 2 × the data**. 32 KB of traffic to unpack 16 KB, for bits that were already in registers.
+
+Is this *the* way the compiler unpacks? For this source spelling, yes — always. We found no spelling of a scalar int→half bit reinterpret that bisheng lowers without the stack: the pun, the union, scalar `alloc_var`, every thread count, every flag, all produce the identical STK/LDK encodings of §9.3. But it is not the only unpacking mechanism the compiler has, and not a hardware need:
+
+- `F2F` converts fp16→fp32 **in registers** — the `x` path uses it, zero stack ops.
+- `__half22float2` converts a packed pair **in registers** — the intrinsic exists in the CCE headers, and TileLang codegen already emits it for a vectorized `float16x2 → float32x2` cast (`PrintVectorizedCast`). The `xh_vec` probe showed a pun-free load with it.
+- `a_row8_pack.asc` moves the same packed words and folds them as u32 — no stack, 79.92 B/cyc.
+
+So the round trip is bisheng's answer to *taking the address of a scalar and re-reading it as `half`*, nothing more. Ask for a conversion (or the vector intrinsic) instead of an address, and the same unpacking stays in registers. That is exactly the fix in section 6, item 1.
+
+### 9.3 TileLang V3 and CCE V3: the same lowering, instruction for instruction
+
+Extracted from the two traces (`instr.bin`, VF[1], first word unpack of row q). PC and the 64-bit instruction encoding come straight from the decoded log lines.
+
+**TileLang V3** (`runs/v3_row-n2048-k8-t256/`):
+
+| tick | PC | op | encoding |
+|---:|---|---|---|
+| +199 | `0x…d3a8` | LDS | `0x383400082004009c` |
+| +229 | `0x…d3f0` | SHFI | `0x40382008120e045c` |
+| +236 | `0x…d3f8` | STK | `0x380403821c14009c` |
+| +252 | `0x…d400` | LDK | `0x38040384e00804dc` |
+| +257 | `0x…d408` | STK | `0x400403021c14009c` |
+| +288 | `0x…d410` | LDK | `0x40040304e808049c` |
+
+**CCE V3** (`runs/v3_cce-n2048-k8-t256/`):
+
+| tick | PC | op | encoding |
+|---:|---|---|---|
+| +150 | `0x…d3a0` | LDS | `0x383600082004009c` |
+| +181 | `0x…d3d0` | SHFI | `0x40382008120e045c` |
+| +186 | `0x…d3d8` | STK | `0x380403821c14009c` |
+| +193 | `0x…d3e0` | LDK | `0x38040384e40804dc` |
+| +197 | `0x…d3e8` | STK | `0x400403021c14009c` |
+| +203 | `0x…d3f0` | LDK | `0x40040304e008049c` |
+
+- The SHFI encoding is **bit-identical**: `0x40382008120e045c`. Same source register, same shift.
+- Both STK encodings are **bit-identical**: `0x380403821c14009c` (low half) and `0x400403021c14009c` (high half). Same source registers, same two stack slots, same 2-byte width.
+- The LDK encodings differ in one nibble — the destination register the half lands in (`…e00804dc` vs `…e40804dc`) — because CCE feeds a different temp. The slot addresses match.
+- Both kernels have exactly 8 distinct STK PCs and 8 distinct LDK PCs, each firing 32 times. Two different spellings — `*(half*)(&v_)` vs `union {u32; half[2]}` — compile to the same register, the same stack slot, and the same width. bisheng lowers any int→half bit reinterpretation through the stack.
+
+### 9.4 Summary against the two kernels
+
+**Table 9.** The budget of §9.1 against what the two kernels measured. The byte rows are the whole block; the STK/LDK row is issues per VF.
 
 | | Theoretical | TileLang V3 | CCE V3 |
 |---|---:|---:|---:|
-| Live bytes, one thread (Table 7) | ~88 B | ~88 B | ~88 B |
-| Live bytes, 256 threads (Table 8) | 22 KB | 22 KB | 22 KB |
-| Fits in the 128 KB register file | yes, 22 KB of 128 KB (17%) | yes, same 22 KB | yes, same 22 KB |
+| Live bytes, one thread | ~88 B (Table 7) | ~88 B | ~56 B (leaner spelling) |
+| Live bytes, 256 threads | 22 KB (Table 8) | 22 KB | ~14 KB |
+| Fits in the 128 KB register file | yes, 17% | yes, 17% | yes, 11% |
 | STK / LDK, issues per VF | 0 | 512 / 512 | 512 / 512 |
+| Stack traffic per VF | 0 | 32 KB | 32 KB |
 | VF, ticks | — | 4424 | 5439 |
 | el/cyc | — | 0.46 | 0.38 |
-| Where the stack sits | — | four segments, 1173 busy ticks, 73% of the 1607-tick VF | STK from +186, alternating with F2F and FFMA, span 1623 |
 
-- Both kernels spill the full 512/512 while the block is only holding 22 KB of the 128 KB file.
-- TileLang V3 pays 1173 stack-busy ticks inside a 1607-tick VF, and the load band falls to 28.15 B/cyc.
-- CCE V3, written with a union bitcast instead of the pun, spills the same count and is slower end to end (0.38 el/cyc against 0.46).
-- The loads-only CCE on the same addresses, with no unpack, does not spill and scores 79.92 B/cyc.
+- Both kernels spill the full 512/512 with 5–8× register headroom.
+- The spilled values are the 16-bit halves of each packed word — not `x`, not `wa`, not the accumulators.
+- The loads-only CCE, `cce/a_row8_pack.asc`, same addresses with no unpack, does not spill and scores **79.92 B/cyc**. The spill appears exactly when the packed word is split into two halves.
 
 ## 10. Conclusion
 
